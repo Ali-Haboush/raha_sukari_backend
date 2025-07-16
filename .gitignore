@@ -1,0 +1,45 @@
+# Python files to ignore
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+*.exe
+*.dll
+*.so
+*.dylib
+.Python/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.memo
+venv/  # <--- هذا مهم جداً: بيتجاهل مجلد البيئة الافتراضية بتاعتك
+.venv/ # ممكن تكون البيئة الافتراضية هنا
+env/   # أو هنا
+.env/  # أو هنا
+
+# Django specific files to ignore
+*.log
+*.pot
+*.mo
+*.sqlite3 # <--- هذا مهم جداً: بيتجاهل ملف قاعدة البيانات db.sqlite3
+db.sqlite3-journal
+media/ # لو عندك مجلد media للملفات المرفوعة
+static/ # لو عندك مجلد static لملفات الويب الثابتة
+
+# IDE specific files (e.g., VS Code)
+.vscode/ # ملفات إعدادات VS Code الخاصة بك
+
+# Operating System specific files
+.DS_Store # ملفات خاصة بنظام macOS
+.Trashes
+Thumbs.db # ملفات خاصة بنظام Windows
