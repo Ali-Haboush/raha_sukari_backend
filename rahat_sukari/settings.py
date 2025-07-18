@@ -32,6 +32,7 @@ ALLOWED_HOSTS = [] # يمكن إضافة نطاقات موقعك هنا في ا�
 
 # Application definition
 
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -39,9 +40,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'rest_framework',              # أضفنا Django REST Framework
-    'rest_framework.authtoken',    # أضفنا تطبيق التوكن للمصادقة (مهم جداً)
-    'core',                        # هذا تطبيقنا الأساسي 'core'
+    'rest_framework',
+    'rest_framework.authtoken',
+    'drf_yasg',    # <--- هذا السطر الجديد
+    'core',
 ]
 
 MIDDLEWARE = [
