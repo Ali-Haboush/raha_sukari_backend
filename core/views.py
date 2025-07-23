@@ -4,7 +4,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
-from django.db.models import Q # لإجراء بحث أو فلترة معقدة
+from django.db.models import Q
 
 from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote
 from .serializers import (
@@ -14,10 +14,14 @@ from .serializers import (
     DoctorNoteSerializer,
     DoctorPatientListSerializer,
     DoctorPatientDetailSerializer,
-    UserSerializer
+    UserSerializer,
+    AuthTokenSerializer # استيراد السيريالايزر الجديد
 )
 from django.contrib.auth.models import User
-from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor # استيراد الصلاحيات المخصصة
+from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor
+
+from rest_framework.authtoken.models import Token # لاستخدام نموذج التوكن
+from rest_framework.authtoken.views import ObtainAuthToken as OriginalObtainAuthToken # استيراد الأصلية
 
 
 # ViewSet للمستخدمين (للتعامل مع تسجيل الدخول/الخروج وإنشاء المستخدمين)
@@ -26,20 +30,16 @@ class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
 
     def get_permissions(self):
-        # السماح بالتسجيل (create) لأي شخص (مريض)
         if self.action == 'create':
             permission_classes = [permissions.AllowAny]
-        # المستخدم بيقدر يشوف أو يعدل بياناته الشخصية بس
         elif self.action in ['retrieve', 'update', 'partial_update', 'destroy']:
             permission_classes = [permissions.IsAuthenticated, IsOwnerOrDoctor]
-        else: # باقي العمليات (مثل list) بس للمستخدمين الإداريين (Doctors)
+        else:
             permission_classes = [IsDoctor]
         return [permission() for permission in permission_classes]
 
-    # عند إنشاء مستخدم جديد (تسجيل حساب جديد)
     def perform_create(self, serializer):
         user = serializer.save()
-        # نربط المستخدم بـ PatientProfile تلقائياً لو هو مريض
         PatientProfile.objects.create(user=user)
 
 
@@ -47,49 +47,38 @@ class UserViewSet(viewsets.ModelViewSet):
 class PatientProfileViewSet(viewsets.ModelViewSet):
     queryset = PatientProfile.objects.all()
     serializer_class = PatientProfileSerializer
-    
-    def get_permissions(self):
-        # الطبيب (IsDoctor) له صلاحيات كاملة على كل ملفات المرضى
-        # صاحب الملف (IsPatientOwner) له صلاحية رؤية وتعديل ملفه فقط
-        if self.action in ['list', 'retrieve', 'create']: # عرض، جلب، إنشاء
-            permission_classes = [IsDoctor | IsPatientOwner]
-        elif self.action in ['update', 'partial_update', 'destroy']: # تعديل، حذف
-            permission_classes = [IsPatientOwner] # المريض فقط يعدل ملفه
-        else: # للـ @action decorators مثل list_for_doctor, doctor_detail, add_doctor_note
-            permission_classes = [IsDoctor] # هذه الإجراءات خاصة بالأطباء
-        return [permission() for permission in permission_classes]
 
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve', 'create']:
+            permission_classes = [IsDoctor | IsPatientOwner]
+        elif self.action in ['update', 'partial_update', 'destroy']:
+            permission_classes = [IsPatientOwner]
+        else:
+            permission_classes = [IsDoctor]
+        return [permission() for permission in permission_classes]
 
     def get_queryset(self):
         user = self.request.user
         if user.is_authenticated:
-            if user.is_staff: # لو المستخدم هو طبيب
-                return PatientProfile.objects.all() # الطبيب بيقدر يشوف كل ملفات المرضى
-            elif hasattr(user, 'patientprofile'): # لو المستخدم مريض
-                # بنرجع بس ملف تعريفه هو
+            if user.is_staff:
+                return PatientProfile.objects.all()
+            elif hasattr(user, 'patientprofile'):
                 return PatientProfile.objects.filter(user=user)
-        return PatientProfile.objects.none() # لو مش مسجل دخول، ما بيشوف شي
+        return PatientProfile.objects.none()
 
-
-    # API خاص للطبيب: جلب قائمة المرضى اللي بيتابعهم
-    # مساره: GET /api/patients/list_for_doctor/
-    @action(detail=False, methods=['get']) # الصلاحية تم تحديدها في get_permissions
+    @action(detail=False, methods=['get'])
     def list_for_doctor(self, request):
         patients = self.get_queryset()
         serializer = DoctorPatientListSerializer(patients, many=True)
         return Response(serializer.data)
 
-    # API خاص للطبيب: جلب تفاصيل مريض محدد
-    # مساره: GET /api/patients/{id}/doctor_detail/
-    @action(detail=True, methods=['get']) # الصلاحية تم تحديدها في get_permissions
+    @action(detail=True, methods=['get'])
     def doctor_detail(self, request, pk=None):
         patient = get_object_or_404(PatientProfile, pk=pk)
         serializer = DoctorPatientDetailSerializer(patient)
         return Response(serializer.data)
 
-    # API خاص للطبيب: إضافة ملاحظة جديدة لمريض
-    # مساره: POST /api/patients/{id}/add_doctor_note/
-    @action(detail=True, methods=['post']) # الصلاحية تم تحديدها في get_permissions
+    @action(detail=True, methods=['post'])
     def add_doctor_note(self, request, pk=None):
         patient = get_object_or_404(PatientProfile, pk=pk)
         note_text = request.data.get('note_text')
@@ -99,10 +88,9 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
 
         DoctorNote.objects.create(
             patient=patient,
-            doctor=request.user, # الطبيب اللي عامل تسجيل دخول
+            doctor=request.user,
             note_text=note_text
         )
-        # ممكن نرجع تفاصيل المريض بعد إضافة الملاحظة عشان الواجهة تتحدث
         serializer = DoctorPatientDetailSerializer(patient)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -111,20 +99,18 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
 class BloodGlucoseReadingViewSet(viewsets.ModelViewSet):
     queryset = BloodGlucoseReading.objects.all()
     serializer_class = BloodGlucoseReadingSerializer
-    permission_classes = [IsOwnerOrDoctor] # يا إما صاحب القراءة، يا إما طبيب
+    permission_classes = [IsOwnerOrDoctor]
 
     def get_queryset(self):
         user = self.request.user
         if user.is_authenticated:
-            if user.is_staff: # لو المستخدم طبيب
-                # الطبيب بيشوف كل القراءات حالياً، ممكن تعديلها لاحقاً لمرضاه فقط
+            if user.is_staff:
                 return BloodGlucoseReading.objects.all()
-            elif hasattr(user, 'patientprofile'): # لو المستخدم مريض
+            elif hasattr(user, 'patientprofile'):
                 return BloodGlucoseReading.objects.filter(patient=user.patientprofile)
         return BloodGlucoseReading.objects.none()
 
     def perform_create(self, serializer):
-        # لما المريض بيضيف قراءة، بنربطها فيه تلقائياً
         if hasattr(self.request.user, 'patientprofile'):
             serializer.save(patient=self.request.user.patientprofile)
         else:
@@ -135,15 +121,14 @@ class BloodGlucoseReadingViewSet(viewsets.ModelViewSet):
 class MedicationViewSet(viewsets.ModelViewSet):
     queryset = Medication.objects.all()
     serializer_class = MedicationSerializer
-    permission_classes = [IsOwnerOrDoctor] # يا إما صاحب الدواء، يا إما طبيب
+    permission_classes = [IsOwnerOrDoctor]
 
     def get_queryset(self):
         user = self.request.user
         if user.is_authenticated:
-            if user.is_staff: # لو المستخدم طبيب
-                # الطبيب بيشوف كل الأدوية حالياً، ممكن تعديلها لاحقاً لمرضاه فقط
+            if user.is_staff:
                 return Medication.objects.all()
-            elif hasattr(user, 'patientprofile'): # لو المستخدم مريض
+            elif hasattr(user, 'patientprofile'):
                 return Medication.objects.filter(patient=user.patientprofile)
         return Medication.objects.none()
 
@@ -158,31 +143,43 @@ class MedicationViewSet(viewsets.ModelViewSet):
 class DoctorNoteViewSet(viewsets.ModelViewSet):
     queryset = DoctorNote.objects.all()
     serializer_class = DoctorNoteSerializer
-    # الأطباء بيقدروا يعملوا كل العمليات، المرضى بيقدروا يشوفوا ملاحظاتهم
     permission_classes = [IsDoctor | IsPatientOwner]
 
     def get_queryset(self):
         user = self.request.user
         if user.is_authenticated:
-            if user.is_staff: # لو المستخدم طبيب
-                # بيشوف ملاحظاته هو فقط، أو ملاحظات المرضى اللي بيتابعهم
+            if user.is_staff:
                 return DoctorNote.objects.filter(doctor=user)
-            elif hasattr(user, 'patientprofile'): # لو المستخدم مريض
-                # بيشوف الملاحظات اللي انكتبت عنه
+            elif hasattr(user, 'patientprofile'):
                 return DoctorNote.objects.filter(patient=user.patientprofile)
         return DoctorNote.objects.none()
 
     def perform_create(self, serializer):
-        # لما الطبيب يضيف ملاحظة، بنربطها فيه تلقائياً
         if self.request.user.is_staff:
             serializer.save(doctor=self.request.user)
         else:
             raise serializers.ValidationError("Only doctors can add notes.")
 
     def get_permissions(self):
-        # لو العملية هي تحديث أو حذف، لازم يكون طبيب
         if self.action in ['update', 'partial_update', 'destroy']:
             self.permission_classes = [IsDoctor]
-        else: # باقي العمليات (عرض، إضافة)
+        else:
             self.permission_classes = [IsDoctor | IsPatientOwner]
         return super().get_permissions()
+
+# --- Viewset جديد لتسجيل الدخول بالبريد الإلكتروني أو اسم المستخدم ---
+class ObtainAuthToken(OriginalObtainAuthToken):
+    serializer_class = AuthTokenSerializer # استخدام السيريالايزر المخصص بتاعنا
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data,
+                                           context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+        token, created = Token.objects.get_or_create(user=user)
+        return Response({
+            'token': token.key,
+            'user_id': user.pk,
+            'email': user.email,
+            'username': user.username
+        })

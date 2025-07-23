@@ -9,7 +9,8 @@ from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
-from rest_framework.authtoken.views import obtain_auth_token # عشان API التوكن
+# استيراد View التوكن المخصص بتاعنا
+from core.views import ObtainAuthToken # <--- هذا السطر الجديد
 
 from core import views
 
@@ -24,7 +25,7 @@ schema_view = get_schema_view(
         license=openapi.License(name="BSD License"),
     ),
     public=True,
-    permission_classes=(permissions.AllowAny,), # للسماح لأي أحد بالوصول لصفحة التوثيق
+    permission_classes=(permissions.AllowAny,),
 )
 
 
@@ -37,15 +38,15 @@ router.register(r'medications', views.MedicationViewSet)
 router.register(r'doctor_notes', views.DoctorNoteViewSet)
 
 urlpatterns = [
-    path('admin/', admin.site.urls), # مسار لوحة الإدارة
-    path('api/', include(router.urls)), # تضمين جميع مسارات الـ APIs التي أنشأها الـ Router تحت '/api/'
-    path('api-auth/', include('rest_framework.urls', namespace='rest_framework')), # مسارات تسجيل الدخول/الخروج الافتراضية لـ DRF
+    path('admin/', admin.site.urls),
+    path('api/', include(router.urls)),
+    path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
 
-    # مسار خاص لتوليد التوكنات (API للتسجيل والدخول باستخدام التوكن)
-    path('api/token/', obtain_auth_token), # هذا المسار الضروري اللي عدلناه سابقا
+    # مسار تسجيل الدخول للحصول على التوكن (الآن يستخدم الـ View المخصص بتاعنا)
+    path('api/token/', ObtainAuthToken.as_view(), name='obtain-auth-token'), # <--- هذا السطر تم تعديله
 
-    # مسارات التوثيق (Swagger UI) - هذا هو الجديد والمهم
+    # مسارات التوثيق (Swagger UI)
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
-    path('swagger.json', schema_view.without_ui(cache_timeout=0), name='schema-json'), # هذا هو رابط ملف الـ JSON اللي Postman بيفهمه
+    path('swagger.json', schema_view.without_ui(cache_timeout=0), name='schema-json'),
 ]
