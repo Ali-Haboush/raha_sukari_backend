@@ -5,56 +5,80 @@ from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
-# Serializer لنموذج المستخدم الأساسي في Django (تم تعديل حقول الإدخال والإخراج)
+# Serializer لنموذج المستخدم الأساسي في Django
 class UserSerializer(serializers.ModelSerializer):
-    # هذا الحقل سيتم استقباله من الواجهة الأمامية كاسم كامل
     full_name = serializers.CharField(write_only=True, required=True)
 
     class Meta:
         model = User
-        # هذه الحقول هي التي سيتم استقبالها من الواجهة الأمامية وإخراجها في الرد
-        # full_name هو فقط للإدخال (write_only)
-        # password هو فقط للإدخال (write_only)
-        # username, first_name, last_name, email, id هي للإخراج أيضاً
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 'password', 'full_name']
         extra_kwargs = {
             'password': {'write_only': True, 'required': True},
-            # نحدد أن هذه الحقول للقراءة فقط عند الإخراج، لأننا نتحكم في قيمها عند الإنشاء
             'username': {'read_only': True},
             'first_name': {'read_only': True},
             'last_name': {'read_only': True},
         }
 
     def create(self, validated_data):
-        # نقوم بإزالة 'full_name' من البيانات لأنها ليست حقلاً مباشراً في نموذج User
         full_name = validated_data.pop('full_name')
-
-        # نقوم بتقسيم الاسم الكامل إلى اسم أول واسم أخير
-        name_parts = full_name.split(' ', 1) # نقسم عند أول مسافة فقط
+        name_parts = full_name.split(' ', 1)
         first_name = name_parts[0]
-        # إذا كان هناك جزء ثانٍ بعد المسافة الأولى، فهو اسم العائلة، وإلا فاسم العائلة فارغ
         last_name = name_parts[1] if len(name_parts) > 1 else ''
 
-        # إذا لم يتم توفير اسم مستخدم (وهذا هو الحال في الواجهة الجديدة التي تعتمد على البريد الإلكتروني)
-        # نستخدم البريد الإلكتروني كاسم مستخدم تلقائياً
         if 'username' not in validated_data or not validated_data['username']:
             validated_data['username'] = validated_data['email']
 
-        # نقوم بإنشاء المستخدم باستخدام البيانات المعالجة
         user = User.objects.create_user(
             first_name=first_name,
             last_name=last_name,
-            **validated_data # هذه تحتوي على username, email, password
+            **validated_data
         )
         return user
 
-# Serializer لملف تعريف المريض
+    def update(self, instance, validated_data):
+        if 'full_name' in validated_data:
+            full_name = validated_data.pop('full_name')
+            name_parts = full_name.split(' ', 1)
+            instance.first_name = name_parts[0]
+            instance.last_name = name_parts[1] if len(name_parts) > 1 else ''
+
+        if 'email' in validated_data:
+            instance.email = validated_data.get('email', instance.email)
+            if instance.username == instance.email:
+                instance.username = instance.email
+
+        if 'password' in validated_data:
+            instance.set_password(validated_data['password'])
+
+        instance.save()
+        return instance
+
+# Serializer لملف تعريف المريض (تم التعديل)
 class PatientProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+
+    address = serializers.CharField(required=False, allow_blank=True)
+    gender = serializers.CharField(required=False, allow_blank=True)
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    phone_number = serializers.CharField(required=False, allow_blank=True)
+    profile_picture = serializers.ImageField(read_only=True)
+
+    # <--- إضافة الحقل الجديد هنا
+    medical_notes = serializers.CharField(required=False, allow_blank=True)
+    # --- نهاية الحقل الجديد
 
     class Meta:
         model = PatientProfile
         fields = '__all__'
+
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            if attr not in ['user', 'profile_picture']:
+                setattr(instance, attr, value)
+
+        instance.save()
+        return instance
+
 
 # Serializer لقراءة السكر
 class BloodGlucoseReadingSerializer(serializers.ModelSerializer):

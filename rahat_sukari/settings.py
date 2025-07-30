@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
 from pathlib import Path
+import os # <--- تم إضافة هذا السطر لاستخدام os.path
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -32,7 +34,6 @@ ALLOWED_HOSTS = [] # يمكن إضافة نطاقات موقعك هنا في ا�
 
 # Application definition
 
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -42,7 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
-    'drf_yasg',    # <--- هذا السطر الجديد
+    'drf_yasg',
     'core',
 ]
 
@@ -50,7 +51,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware', # <--- هذا هو السطر الصحيح الوحيد للـ CSRF
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -120,9 +121,11 @@ USE_TZ = True # تفعيل دعم المناطق الزمنية
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.0/howto/static-files/
+# https://docs.djangoproject.com/en/5.0/topics/static-files/
 
 STATIC_URL = 'static/' # مسار ملفات الـ Static (CSS, JS, صور)
+
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles') # <--- هذا السطر تم التأكد من وجوده
 
 
 # Default primary key field type
@@ -134,12 +137,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField' # نوع المفتاح ا�
 # إعدادات Django REST Framework (DRF)
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication', # هذا يستخدم التوكن للمصادقة (مثالي لتطبيقات الموبايل)
-        'rest_framework.authentication.SessionAuthentication', # هذا يستخدم الجلسات للمصادقة (مثالي للويب ولوحة الإدارة)
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated', # بشكل افتراضي، أي API تتطلب تسجيل دخول
+        'rest_framework.permissions.IsAuthenticated',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination', # إعدادات التقسيم لصفحات للـ APIs
-    'PAGE_SIZE': 10 # عدد العناصر الافتراضي في كل صفحة (اختياري، يمكن تعديله)
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10
 }

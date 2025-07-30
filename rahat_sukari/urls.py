@@ -10,9 +10,13 @@ from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
 # استيراد View التوكن المخصص بتاعنا
-from core.views import ObtainAuthToken # <--- هذا السطر الجديد
+from core.views import ObtainAuthToken
 
 from core import views
+
+# مهم جداً: استيراد لإعدادات الملفات الـ static في وضع التطوير
+from django.conf import settings
+from django.conf.urls.static import static
 
 # إعدادات الـ schema (صفحة التوثيق)
 schema_view = get_schema_view(
@@ -42,11 +46,16 @@ urlpatterns = [
     path('api/', include(router.urls)),
     path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
 
-    # مسار تسجيل الدخول للحصول على التوكن (الآن يستخدم الـ View المخصص بتاعنا)
-    path('api/token/', ObtainAuthToken.as_view(), name='obtain-auth-token'), # <--- هذا السطر تم تعديله
+    path('api/token/', ObtainAuthToken.as_view(), name='obtain-auth-token'),
 
     # مسارات التوثيق (Swagger UI)
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('swagger.json', schema_view.without_ui(cache_timeout=0), name='schema-json'),
 ]
+
+# مهم جداً: إضافة مسارات لخدمة الملفات الـ static والـ media في وضع التطوير (DEBUG = True)
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    # اذا كان عندك ملفات media مرفوعة من المستخدمين، بنضيفها كمان
+    # urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -1,12 +1,10 @@
 # core/models.py
 
 from django.db import models
-from django.contrib.auth.models import User # لاستخدام نموذج المستخدم الأساسي في Django
+from django.contrib.auth.models import User
 
-# 1. نموذج PatientProfile (معلومات إضافية عن المريض)
+# 1. نموذج PatientProfile (معلومات إضافية عن المريض - تم التعديل)
 class PatientProfile(models.Model):
-    # ربط ملف تعريف المريض بنموذج المستخدم الأساسي في Django
-    # on_delete=models.CASCADE: لو تم حذف المستخدم، ملف تعريفه بينحذف معاه تلقائياً
     user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="المستخدم")
     age = models.IntegerField(null=True, blank=True, verbose_name="العمر")
     weight_kg = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, verbose_name="الوزن (كجم)")
@@ -21,6 +19,20 @@ class PatientProfile(models.Model):
     diabetes_type = models.CharField(max_length=20, choices=DIABETES_TYPE_CHOICES, default='Type 2', verbose_name="نوع السكري")
     diagnosis_date = models.DateField(null=True, blank=True, verbose_name="تاريخ التشخيص")
 
+ 
+    address = models.CharField(max_length=255, null=True, blank=True, verbose_name="العنوان")
+    GENDER_CHOICES = [
+        ('Male', 'ذكر'),
+        ('Female', 'أنثى'),
+        ('Other', 'أخرى'),
+    ]
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, null=True, blank=True, verbose_name="الجنس")
+    date_of_birth = models.DateField(null=True, blank=True, verbose_name="تاريخ الميلاد")
+    phone_number = models.CharField(max_length=20, null=True, blank=True, verbose_name="رقم الهاتف")
+    profile_picture = models.ImageField(upload_to='profile_pics/', null=True, blank=True, verbose_name="الصورة الشخصية")
+    # --- نهاية الحقول الجديدة ---
+    medical_notes = models.TextField(null=True, blank=True, verbose_name="ملاحظات طبية للطبيب")
+
     def __str__(self):
         return f"ملف تعريف لـ {self.user.username}"
 
@@ -28,14 +40,11 @@ class PatientProfile(models.Model):
         verbose_name = "ملف تعريف المريض"
         verbose_name_plural = "ملفات تعريف المرضى"
 
-# 2. نموذج BloodGlucoseReading (قراءات السكر)
+# ... باقي الـ Models زي ما هي ما تغيرت (BloodGlucoseReading, Medication, DoctorNote) ...
 class BloodGlucoseReading(models.Model):
-    # ربط القراءة بالمريض اللي عملها
-    # related_name='glucose_readings': بيسمح لنا نجيب كل قراءات السكر لمريض معين بسهولة (patient.glucose_readings.all())
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='glucose_readings', verbose_name="المريض")
-    value = models.DecimalField(max_digits=5, decimal_places=2, verbose_name="قيمة السكر") # مثال: 120.50
-    timestamp = models.DateTimeField(auto_now_add=True, verbose_name="التاريخ والوقت") # بيتسجل تلقائياً عند إضافة القراءة
-
+    value = models.DecimalField(max_digits=5, decimal_places=2, verbose_name="قيمة السكر")
+    timestamp = models.DateTimeField(auto_now_add=True, verbose_name="التاريخ والوقت")
     READING_TYPE_CHOICES = [
         ('Before Meal', 'قبل الوجبة'),
         ('After Meal', 'بعد الوجبة'),
@@ -52,15 +61,13 @@ class BloodGlucoseReading(models.Model):
     class Meta:
         verbose_name = "قراءة سكر"
         verbose_name_plural = "قراءات السكر"
-        ordering = ['-timestamp'] # ترتيب القراءات من الأحدث للأقدم
+        ordering = ['-timestamp']
 
-# 3. نموذج Medication (الأدوية)
+
 class Medication(models.Model):
-    # ربط الدواء بالمريض اللي بياخده
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='medications', verbose_name="المريض")
     name = models.CharField(max_length=100, verbose_name="اسم الدواء")
     dosage = models.CharField(max_length=50, null=True, blank=True, verbose_name="الجرعة")
-
     ADMINISTRATION_CHOICES = [
         ('Oral', 'فموي'),
         ('Injection', 'حقن'),
@@ -79,11 +86,8 @@ class Medication(models.Model):
         verbose_name = "دواء"
         verbose_name_plural = "الأدوية"
 
-# 4. نموذج DoctorNote (ملاحظات الطبيب)
 class DoctorNote(models.Model):
-    # ربط الملاحظة بالمريض المعني والطبيب اللي كتبها
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='doctor_notes', verbose_name="المريض")
-    # ممكن نربط الطبيب اللي كتب الملاحظة مباشرة بنموذج User عشان نعرف مين اللي كتب الملاحظة
     doctor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="الطبيب")
     note_text = models.TextField(verbose_name="نص الملاحظة")
     timestamp = models.DateTimeField(auto_now_add=True, verbose_name="التاريخ والوقت")
@@ -95,4 +99,4 @@ class DoctorNote(models.Model):
     class Meta:
         verbose_name = "ملاحظة طبيب"
         verbose_name_plural = "ملاحظات الأطباء"
-        ordering = ['-timestamp'] # ترتيب الملاحظات من الأحدث للأقدم
+        ordering = ['-timestamp']
