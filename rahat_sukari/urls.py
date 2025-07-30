@@ -9,12 +9,11 @@ from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
-# استيراد View التوكن المخصص بتاعنا
 from core.views import ObtainAuthToken
 
 from core import views
 
-# مهم جداً: استيراد لإعدادات الملفات الـ static في وضع التطوير
+# مهم جداً: استيراد لإعدادات الملفات الـ static والـ media في وضع التطوير
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -40,6 +39,7 @@ router.register(r'patients', views.PatientProfileViewSet)
 router.register(r'readings', views.BloodGlucoseReadingViewSet)
 router.register(r'medications', views.MedicationViewSet)
 router.register(r'doctor_notes', views.DoctorNoteViewSet)
+router.register(r'attachments', views.AttachmentViewSet) # <--- تم إضافة هذا السطر الجديد
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -57,5 +57,4 @@ urlpatterns = [
 # مهم جداً: إضافة مسارات لخدمة الملفات الـ static والـ media في وضع التطوير (DEBUG = True)
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-    # اذا كان عندك ملفات media مرفوعة من المستخدمين، بنضيفها كمان
-    # urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

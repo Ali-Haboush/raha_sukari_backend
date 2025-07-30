@@ -3,7 +3,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 
-# 1. نموذج PatientProfile (معلومات إضافية عن المريض - تم التعديل)
+# 1. نموذج PatientProfile (معلومات إضافية عن المريض)
 class PatientProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="المستخدم")
     age = models.IntegerField(null=True, blank=True, verbose_name="العمر")
@@ -19,7 +19,6 @@ class PatientProfile(models.Model):
     diabetes_type = models.CharField(max_length=20, choices=DIABETES_TYPE_CHOICES, default='Type 2', verbose_name="نوع السكري")
     diagnosis_date = models.DateField(null=True, blank=True, verbose_name="تاريخ التشخيص")
 
- 
     address = models.CharField(max_length=255, null=True, blank=True, verbose_name="العنوان")
     GENDER_CHOICES = [
         ('Male', 'ذكر'),
@@ -30,7 +29,6 @@ class PatientProfile(models.Model):
     date_of_birth = models.DateField(null=True, blank=True, verbose_name="تاريخ الميلاد")
     phone_number = models.CharField(max_length=20, null=True, blank=True, verbose_name="رقم الهاتف")
     profile_picture = models.ImageField(upload_to='profile_pics/', null=True, blank=True, verbose_name="الصورة الشخصية")
-    # --- نهاية الحقول الجديدة ---
     medical_notes = models.TextField(null=True, blank=True, verbose_name="ملاحظات طبية للطبيب")
 
     def __str__(self):
@@ -40,11 +38,12 @@ class PatientProfile(models.Model):
         verbose_name = "ملف تعريف المريض"
         verbose_name_plural = "ملفات تعريف المرضى"
 
-# ... باقي الـ Models زي ما هي ما تغيرت (BloodGlucoseReading, Medication, DoctorNote) ...
+# 2. نموذج BloodGlucoseReading (قراءات السكر)
 class BloodGlucoseReading(models.Model):
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='glucose_readings', verbose_name="المريض")
     value = models.DecimalField(max_digits=5, decimal_places=2, verbose_name="قيمة السكر")
     timestamp = models.DateTimeField(auto_now_add=True, verbose_name="التاريخ والوقت")
+
     READING_TYPE_CHOICES = [
         ('Before Meal', 'قبل الوجبة'),
         ('After Meal', 'بعد الوجبة'),
@@ -64,10 +63,12 @@ class BloodGlucoseReading(models.Model):
         ordering = ['-timestamp']
 
 
+# 3. نموذج Medication (الأدوية)
 class Medication(models.Model):
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='medications', verbose_name="المريض")
     name = models.CharField(max_length=100, verbose_name="اسم الدواء")
     dosage = models.CharField(max_length=50, null=True, blank=True, verbose_name="الجرعة")
+
     ADMINISTRATION_CHOICES = [
         ('Oral', 'فموي'),
         ('Injection', 'حقن'),
@@ -86,6 +87,7 @@ class Medication(models.Model):
         verbose_name = "دواء"
         verbose_name_plural = "الأدوية"
 
+# 4. نموذج DoctorNote (ملاحظات الطبيب)
 class DoctorNote(models.Model):
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='doctor_notes', verbose_name="المريض")
     doctor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="الطبيب")
@@ -100,3 +102,20 @@ class DoctorNote(models.Model):
         verbose_name = "ملاحظة طبيب"
         verbose_name_plural = "ملاحظات الأطباء"
         ordering = ['-timestamp']
+
+# <--- نموذج جديد: Attachment (المرفقات)
+class Attachment(models.Model):
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='attachments', verbose_name="المريض")
+    # FileField يمكن أن يخزن أي نوع من الملفات. 'attachments/' هو المجلد الفرعي داخل MEDIA_ROOT
+    file = models.FileField(upload_to='attachments/', verbose_name="الملف")
+    description = models.CharField(max_length=255, null=True, blank=True, verbose_name="الوصف")
+    uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الرفع")
+
+    def __str__(self):
+        return f"مرفق لـ {self.patient.user.username} - {self.file.name.split('/')[-1]}" # عرض اسم الملف فقط
+
+    class Meta:
+        verbose_name = "مرفق"
+        verbose_name_plural = "المرفقات"
+        ordering = ['-uploaded_at']
+# --- نهاية نموذج Attachment ---

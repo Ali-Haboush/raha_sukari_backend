@@ -6,7 +6,7 @@ from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment # تم إضافة Attachment
 from .serializers import (
     PatientProfileSerializer,
     BloodGlucoseReadingSerializer,
@@ -15,16 +15,17 @@ from .serializers import (
     DoctorPatientListSerializer,
     DoctorPatientDetailSerializer,
     UserSerializer,
-    AuthTokenSerializer # استيراد السيريالايزر الجديد
+    AuthTokenSerializer,
+    AttachmentSerializer # تم إضافة AttachmentSerializer
 )
 from django.contrib.auth.models import User
 from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor
 
-from rest_framework.authtoken.models import Token # لاستخدام نموذج التوكن
-from rest_framework.authtoken.views import ObtainAuthToken as OriginalObtainAuthToken # استيراد الأصلية
+from rest_framework.authtoken.models import Token
+from rest_framework.authtoken.views import ObtainAuthToken as OriginalObtainAuthToken
 
 
-# ViewSet للمستخدمين (للتعامل مع تسجيل الدخول/الخروج وإنشاء المستخدمين)
+# ViewSet للمستخدمين
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
@@ -167,9 +168,42 @@ class DoctorNoteViewSet(viewsets.ModelViewSet):
             self.permission_classes = [IsDoctor | IsPatientOwner]
         return super().get_permissions()
 
-# --- Viewset جديد لتسجيل الدخول بالبريد الإلكتروني أو اسم المستخدم ---
+# --- Viewset الجديد: AttachmentViewSet (للمرفقات) ---
+class AttachmentViewSet(viewsets.ModelViewSet):
+    queryset = Attachment.objects.all()
+    serializer_class = AttachmentSerializer
+    permission_classes = [permissions.IsAuthenticated] # فقط المستخدمين المسجلين
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            if user.is_staff: # الأطباء بيشوفوا كل المرفقات
+                return Attachment.objects.all()
+            elif hasattr(user, 'patientprofile'): # المريض بيشوف مرفقاته بس
+                return Attachment.objects.filter(patient=user.patientprofile)
+        return Attachment.objects.none()
+
+    def perform_create(self, serializer):
+        # عند رفع مرفق جديد، نربطه بالمريض الذي قام بالرفع (إذا كان مريضاً)
+        if hasattr(self.request.user, 'patientprofile'):
+            serializer.save(patient=self.request.user.patientprofile)
+        else:
+            # إذا كان طبيب بيرفع، ممكن نحتاج منطق نحدد المريض اللي بيتبعه المرفق
+            # حالياً، فقط المريض بيقدر يرفع لنفسه
+            raise serializers.ValidationError("Only patients can upload attachments for themselves.")
+
+    # نعدل صلاحيات الحذف لتكون للمالك أو الطبيب
+    def get_permissions(self):
+        if self.action == 'destroy': # فقط المالك أو الطبيب بيقدر يحذف
+            self.permission_classes = [IsOwnerOrDoctor]
+        else: # باقي العمليات (عرض، إضافة)
+            self.permission_classes = [permissions.IsAuthenticated] # أي مستخدم مسجل دخول
+        return super().get_permissions()
+# --- نهاية AttachmentViewSet ---
+
+# View لتسجيل الدخول بالبريد الإلكتروني أو اسم المستخدم
 class ObtainAuthToken(OriginalObtainAuthToken):
-    serializer_class = AuthTokenSerializer # استخدام السيريالايزر المخصص بتاعنا
+    serializer_class = AuthTokenSerializer
 
     def post(self, request, *args, **kwargs):
         serializer = self.serializer_class(data=request.data,

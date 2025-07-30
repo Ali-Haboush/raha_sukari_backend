@@ -1,7 +1,7 @@
 # core/serializers.py
 
 from rest_framework import serializers
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment # تم إضافة Attachment
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
@@ -53,7 +53,7 @@ class UserSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
-# Serializer لملف تعريف المريض (تم التعديل)
+# Serializer لملف تعريف المريض
 class PatientProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
 
@@ -61,11 +61,8 @@ class PatientProfileSerializer(serializers.ModelSerializer):
     gender = serializers.CharField(required=False, allow_blank=True)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     phone_number = serializers.CharField(required=False, allow_blank=True)
-    profile_picture = serializers.ImageField(read_only=True)
-
-    # <--- إضافة الحقل الجديد هنا
+    profile_picture = serializers.ImageField(read_only=True) # لا يزال للقراءة فقط
     medical_notes = serializers.CharField(required=False, allow_blank=True)
-    # --- نهاية الحقل الجديد
 
     class Meta:
         model = PatientProfile
@@ -78,7 +75,6 @@ class PatientProfileSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
-
 
 # Serializer لقراءة السكر
 class BloodGlucoseReadingSerializer(serializers.ModelSerializer):
@@ -100,6 +96,25 @@ class DoctorNoteSerializer(serializers.ModelSerializer):
         model = DoctorNote
         fields = ['id', 'patient', 'doctor', 'note_text', 'timestamp']
 
+# --- Serializer الجديد: AttachmentSerializer (للمرفقات) ---
+class AttachmentSerializer(serializers.ModelSerializer):
+    # file_url لعرض رابط الملف بعد رفعه
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Attachment
+        fields = '__all__'
+        read_only_fields = ['patient', 'uploaded_at'] # تاريخ الرفع يتم تحديده تلقائياً
+
+    def get_file_url(self, obj):
+        # التأكد من أن 'request' موجود في السياق
+        request = self.context.get('request')
+        if request is not None:
+            return request.build_absolute_uri(obj.file.url)
+        return obj.file.url # إذا لم يكن هناك request (مثلاً في اختبارات الوحدة)
+
+# --- نهاية AttachmentSerializer ---
+
 # --- Serializers خاصة بواجهات الطبيب ---
 
 class DoctorPatientListSerializer(serializers.ModelSerializer):
@@ -114,6 +129,8 @@ class DoctorPatientDetailSerializer(serializers.ModelSerializer):
     glucose_readings = BloodGlucoseReadingSerializer(many=True, read_only=True)
     medications = MedicationSerializer(many=True, read_only=True)
     doctor_notes = DoctorNoteSerializer(many=True, read_only=True)
+    # أضفنا المرفقات هنا لعرضها ضمن تفاصيل المريض
+    attachments = AttachmentSerializer(many=True, read_only=True) # تم إضافة هذا السطر
 
     class Meta:
         model = PatientProfile

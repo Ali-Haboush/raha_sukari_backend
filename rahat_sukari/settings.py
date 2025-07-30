@@ -13,7 +13,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
 from pathlib import Path
-import os # <--- تم إضافة هذا السطر لاستخدام os.path
+import os
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -24,12 +24,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-@1j38-j-c5%z&s!s)z02y*e^22(e8=02y_c)7(57qg%a%2!9^v' # هذا مفتاح سري، لا تشاركه!
+SECRET_KEY = 'django-insecure-@1j38-j-c5%z&s!s)z02y*e^22(e8=02y_c)7(57qg%a%2!9^v'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True # خلال التطوير، اجعله True. في الإنتاج يجب أن يكون False
+DEBUG = True
 
-ALLOWED_HOSTS = [] # يمكن إضافة نطاقات موقعك هنا في الإنتاج
+ALLOWED_HOSTS = []
 
 
 # Application definition
@@ -51,7 +51,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware', # <--- هذا هو السطر الصحيح الوحيد للـ CSRF
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -111,27 +111,25 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.0/topics/i18n/
 
-LANGUAGE_CODE = 'ar-us' # يمكنك تغييرها إلى 'ar-ar' إذا أردت العربية الفصحى
-
-TIME_ZONE = 'Asia/Gaza' # تحديد المنطقة الزمنية لغزة (مهم للتوقيتات في التطبيق)
-
-USE_I18N = True # تفعيل دعم اللغات المتعددة
-
-USE_TZ = True # تفعيل دعم المناطق الزمنية
+LANGUAGE_CODE = 'ar-us'
+TIME_ZONE = 'Asia/Gaza'
+USE_I18N = True
+USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.0/topics/static-files/
+STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-STATIC_URL = 'static/' # مسار ملفات الـ Static (CSS, JS, صور)
 
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles') # <--- هذا السطر تم التأكد من وجوده
+# <--- إعدادات ملفات Media (الملفات المرفوعة من المستخدمين)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# --- نهاية إعدادات ملفات Media ---
 
 
 # Default primary key field type
-# https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
-
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField' # نوع المفتاح الأساسي الافتراضي
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # إعدادات Django REST Framework (DRF)
