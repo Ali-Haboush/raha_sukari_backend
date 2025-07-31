@@ -1,7 +1,7 @@
 # core/serializers.py
 
 from rest_framework import serializers
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment # تم إضافة Attachment
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
@@ -53,7 +53,7 @@ class UserSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
-# Serializer لملف تعريف المريض
+# Serializer لملف تعريف المريض (تم التعديل)
 class PatientProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
 
@@ -61,7 +61,11 @@ class PatientProfileSerializer(serializers.ModelSerializer):
     gender = serializers.CharField(required=False, allow_blank=True)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     phone_number = serializers.CharField(required=False, allow_blank=True)
-    profile_picture = serializers.ImageField(read_only=True) # لا يزال للقراءة فقط
+
+    # <--- تم التعديل هنا: profile_picture لم يعد للقراءة فقط
+    profile_picture = serializers.ImageField(required=False, allow_null=True)
+    # --- نهاية التعديل ---
+
     medical_notes = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
@@ -69,9 +73,12 @@ class PatientProfileSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def update(self, instance, validated_data):
+        # <--- تم التعديل هنا: السماح بتحديث profile_picture
+        # يتم استثناء 'user' فقط، لأن 'profile_picture' سيتم التعامل معه
         for attr, value in validated_data.items():
-            if attr not in ['user', 'profile_picture']:
+            if attr != 'user': # لا تستثني profile_picture هنا
                 setattr(instance, attr, value)
+        # --- نهاية التعديل ---
 
         instance.save()
         return instance
@@ -96,24 +103,20 @@ class DoctorNoteSerializer(serializers.ModelSerializer):
         model = DoctorNote
         fields = ['id', 'patient', 'doctor', 'note_text', 'timestamp']
 
-# --- Serializer الجديد: AttachmentSerializer (للمرفقات) ---
+# Serializer للمرفقات
 class AttachmentSerializer(serializers.ModelSerializer):
-    # file_url لعرض رابط الملف بعد رفعه
     file_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Attachment
         fields = '__all__'
-        read_only_fields = ['patient', 'uploaded_at'] # تاريخ الرفع يتم تحديده تلقائياً
+        read_only_fields = ['patient', 'uploaded_at']
 
     def get_file_url(self, obj):
-        # التأكد من أن 'request' موجود في السياق
         request = self.context.get('request')
         if request is not None:
             return request.build_absolute_uri(obj.file.url)
-        return obj.file.url # إذا لم يكن هناك request (مثلاً في اختبارات الوحدة)
-
-# --- نهاية AttachmentSerializer ---
+        return obj.file.url
 
 # --- Serializers خاصة بواجهات الطبيب ---
 
@@ -129,8 +132,7 @@ class DoctorPatientDetailSerializer(serializers.ModelSerializer):
     glucose_readings = BloodGlucoseReadingSerializer(many=True, read_only=True)
     medications = MedicationSerializer(many=True, read_only=True)
     doctor_notes = DoctorNoteSerializer(many=True, read_only=True)
-    # أضفنا المرفقات هنا لعرضها ضمن تفاصيل المريض
-    attachments = AttachmentSerializer(many=True, read_only=True) # تم إضافة هذا السطر
+    attachments = AttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = PatientProfile
