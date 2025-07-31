@@ -2,120 +2,108 @@
 
 from django.db import models
 from django.contrib.auth.models import User
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+import os
 
-# 1. نموذج PatientProfile (معلومات إضافية عن المريض)
+# دالة لمسار حفظ الصورة الشخصية
+def patient_profile_picture_path(instance, filename):
+    # file will be uploaded to MEDIA_ROOT/profile_pics/user_<id>/<filename>
+    return f'profile_pics/user_{instance.user.id}/{filename}'
+
+# دالة لمسار حفظ المرفقات
+def attachment_file_path(instance, filename):
+    # file will be uploaded to MEDIA_ROOT/attachments/patient_<id>/<filename>
+    return f'attachments/patient_{instance.patient.id}/{filename}'
+
+# --- PatientProfile Model ---
 class PatientProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name="المستخدم")
-    age = models.IntegerField(null=True, blank=True, verbose_name="العمر")
-    weight_kg = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, verbose_name="الوزن (كجم)")
-    height_cm = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, verbose_name="الطول (سم)")
-
-    DIABETES_TYPE_CHOICES = [
-        ('Type 1', 'النوع الأول'),
-        ('Type 2', 'النوع الثاني'),
-        ('Gestational', 'سكري الحمل'),
-        ('Other', 'أخرى'),
-    ]
-    diabetes_type = models.CharField(max_length=20, choices=DIABETES_TYPE_CHOICES, default='Type 2', verbose_name="نوع السكري")
-    diagnosis_date = models.DateField(null=True, blank=True, verbose_name="تاريخ التشخيص")
-
-    address = models.CharField(max_length=255, null=True, blank=True, verbose_name="العنوان")
-    GENDER_CHOICES = [
-        ('Male', 'ذكر'),
-        ('Female', 'أنثى'),
-        ('Other', 'أخرى'),
-    ]
-    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, null=True, blank=True, verbose_name="الجنس")
-    date_of_birth = models.DateField(null=True, blank=True, verbose_name="تاريخ الميلاد")
-    phone_number = models.CharField(max_length=20, null=True, blank=True, verbose_name="رقم الهاتف")
-    profile_picture = models.ImageField(upload_to='profile_pics/', null=True, blank=True, verbose_name="الصورة الشخصية")
-    medical_notes = models.TextField(null=True, blank=True, verbose_name="ملاحظات طبية للطبيب")
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='patientprofile')
+    address = models.CharField(max_length=255, blank=True, null=True)
+    gender = models.CharField(max_length=10, blank=True, null=True)
+    date_of_birth = models.DateField(blank=True, null=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+    diabetes_type = models.CharField(max_length=50, blank=True, null=True)
+    diagnosis_date = models.DateField(blank=True, null=True)
+    medical_notes = models.TextField(blank=True, null=True)
+    profile_picture = models.ImageField(upload_to=patient_profile_picture_path, blank=True, null=True)
 
     def __str__(self):
-        return f"ملف تعريف لـ {self.user.username}"
+        return f"Patient Profile for {self.user.username}"
 
-    class Meta:
-        verbose_name = "ملف تعريف المريض"
-        verbose_name_plural = "ملفات تعريف المرضى"
+# Signal لإنشاء PatientProfile تلقائياً عند إنشاء User جديد
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        PatientProfile.objects.create(user=instance)
 
-# 2. نموذج BloodGlucoseReading (قراءات السكر)
+@receiver(post_save, sender=User)
+def save_user_profile(sender, instance, **kwargs):
+    instance.patientprofile.save()
+
+# --- BloodGlucoseReading Model ---
 class BloodGlucoseReading(models.Model):
-    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='glucose_readings', verbose_name="المريض")
-    value = models.DecimalField(max_digits=5, decimal_places=2, verbose_name="قيمة السكر")
-    timestamp = models.DateTimeField(auto_now_add=True, verbose_name="التاريخ والوقت")
-
-    READING_TYPE_CHOICES = [
-        ('Before Meal', 'قبل الوجبة'),
-        ('After Meal', 'بعد الوجبة'),
-        ('Fasting', 'صائم'),
-        ('Before Sleep', 'قبل النوم'),
-        ('Other', 'أخرى'),
-    ]
-    reading_type = models.CharField(max_length=20, choices=READING_TYPE_CHOICES, default='Other', verbose_name="نوع القياس")
-    notes = models.TextField(null=True, blank=True, verbose_name="ملاحظات")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='glucose_readings')
+    reading_value = models.FloatField()
+    reading_timestamp = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return f"قراءة سكر {self.value} لـ {self.patient.user.username} بتاريخ {self.timestamp.strftime('%Y-%m-%d %H:%M')}"
+        return f"Glucose Reading for {self.patient.user.username}: {self.reading_value} at {self.reading_timestamp}"
 
-    class Meta:
-        verbose_name = "قراءة سكر"
-        verbose_name_plural = "قراءات السكر"
-        ordering = ['-timestamp']
-
-
-# 3. نموذج Medication (الأدوية)
+# --- Medication Model ---
 class Medication(models.Model):
-    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='medications', verbose_name="المريض")
-    name = models.CharField(max_length=100, verbose_name="اسم الدواء")
-    dosage = models.CharField(max_length=50, null=True, blank=True, verbose_name="الجرعة")
-
-    ADMINISTRATION_CHOICES = [
-        ('Oral', 'فموي'),
-        ('Injection', 'حقن'),
-        ('Topical', 'موضعي'),
-        ('Other', 'أخرى'),
-    ]
-    administration_method = models.CharField(max_length=20, choices=ADMINISTRATION_CHOICES, default='Oral', verbose_name="طريقة الاستخدام")
-    start_date = models.DateField(null=True, blank=True, verbose_name="تاريخ البدء")
-    end_date = models.DateField(null=True, blank=True, verbose_name="تاريخ الانتهاء")
-    notes = models.TextField(null=True, blank=True, verbose_name="ملاحظات")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='medications')
+    name = models.CharField(max_length=255)
+    dosage = models.CharField(max_length=100, blank=True, null=True)
+    frequency = models.CharField(max_length=100, blank=True, null=True)
+    start_date = models.DateField(blank=True, null=True)
+    end_date = models.DateField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return f"دواء {self.name} لـ {self.patient.user.username}"
+        return f"Medication for {self.patient.user.username}: {self.name}"
 
-    class Meta:
-        verbose_name = "دواء"
-        verbose_name_plural = "الأدوية"
-
-# 4. نموذج DoctorNote (ملاحظات الطبيب)
+# --- DoctorNote Model ---
 class DoctorNote(models.Model):
-    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='doctor_notes', verbose_name="المريض")
-    doctor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="الطبيب")
-    note_text = models.TextField(verbose_name="نص الملاحظة")
-    timestamp = models.DateTimeField(auto_now_add=True, verbose_name="التاريخ والوقت")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='doctor_notes')
+    doctor = models.ForeignKey(User, on_delete=models.CASCADE, related_name='doctor_written_notes')
+    note_text = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        doctor_name = self.doctor.username if self.doctor else "غير معروف"
-        return f"ملاحظة للطبيب {doctor_name} لـ {self.patient.user.username} بتاريخ {self.timestamp.strftime('%Y-%m-%d')}"
+        return f"Note for {self.patient.user.username} by Dr. {self.doctor.first_name} {self.doctor.last_name} on {self.timestamp.date()}"
 
-    class Meta:
-        verbose_name = "ملاحظة طبيب"
-        verbose_name_plural = "ملاحظات الأطباء"
-        ordering = ['-timestamp']
-
-# <--- نموذج جديد: Attachment (المرفقات)
+# --- Attachment Model ---
 class Attachment(models.Model):
-    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='attachments', verbose_name="المريض")
-    # FileField يمكن أن يخزن أي نوع من الملفات. 'attachments/' هو المجلد الفرعي داخل MEDIA_ROOT
-    file = models.FileField(upload_to='attachments/', verbose_name="الملف")
-    description = models.CharField(max_length=255, null=True, blank=True, verbose_name="الوصف")
-    uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الرفع")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to=attachment_file_path)
+    description = models.TextField(blank=True, null=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"مرفق لـ {self.patient.user.username} - {self.file.name.split('/')[-1]}" # عرض اسم الملف فقط
+        return f"Attachment for {self.patient.user.username}: {self.file.name}"
+
+    def delete(self, *args, **kwargs):
+        # Delete the actual file from the file system
+        if self.file:
+            if os.path.isfile(self.file.path):
+                os.remove(self.file.path)
+        super().delete(*args, **kwargs)
+
+# --- NEW: Consultation Model ---
+class Consultation(models.Model):
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='consultations')
+    doctor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='doctor_consultations')
+    consultation_date = models.DateField()
+    consultation_time = models.TimeField()
+    diagnosis = models.TextField(blank=True, null=True)
+    treatment = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "مرفق"
-        verbose_name_plural = "المرفقات"
-        ordering = ['-uploaded_at']
-# --- نهاية نموذج Attachment ---
+        ordering = ['-consultation_date', '-consultation_time'] # ترتيب تنازلي حسب التاريخ والوقت
+
+    def __str__(self):
+        return f"Consultation for {self.patient.user.username} by Dr. {self.doctor.first_name if self.doctor else 'N/A'} on {self.consultation_date}"

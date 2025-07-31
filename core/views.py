@@ -1,208 +1,42 @@
 # core/views.py
 
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework.decorators import action
-from django.shortcuts import get_object_or_404
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.authtoken.models import Token
+from rest_framework import filters
+from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
 
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment # تم إضافة Attachment
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation
 from .serializers import (
-    PatientProfileSerializer,
-    BloodGlucoseReadingSerializer,
-    MedicationSerializer,
-    DoctorNoteSerializer,
-    DoctorPatientListSerializer,
-    DoctorPatientDetailSerializer,
-    UserSerializer,
-    AuthTokenSerializer,
-    AttachmentSerializer # تم إضافة AttachmentSerializer
+    UserSerializer, PatientProfileSerializer, BloodGlucoseReadingSerializer,
+    MedicationSerializer, DoctorNoteSerializer, AttachmentSerializer,
+    AuthTokenSerializer, DoctorPatientListSerializer, DoctorPatientDetailSerializer,
+    ConsultationSerializer
 )
-from django.contrib.auth.models import User
-from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor
+from django.contrib.auth.models import User # تم استيراد User هنا
+from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor # <--- تم تصحيح IsPatient إلى IsPatientOwner
 
-from rest_framework.authtoken.models import Token
-from rest_framework.authtoken.views import ObtainAuthToken as OriginalObtainAuthToken
-
-
-# ViewSet للمستخدمين
+# --- User ViewSet (لإنشاء المستخدمين) ---
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
+    permission_classes = [AllowAny] # يمكن لأي شخص إنشاء مستخدم جديد (تسجيل)
 
     def get_permissions(self):
         if self.action == 'create':
-            permission_classes = [permissions.AllowAny]
-        elif self.action in ['retrieve', 'update', 'partial_update', 'destroy']:
-            permission_classes = [permissions.IsAuthenticated, IsOwnerOrDoctor]
-        else:
-            permission_classes = [IsDoctor]
-        return [permission() for permission in permission_classes]
-
-    def perform_create(self, serializer):
-        user = serializer.save()
-        PatientProfile.objects.create(user=user)
-
-
-# ViewSet لملف تعريف المريض (PatientProfile)
-class PatientProfileViewSet(viewsets.ModelViewSet):
-    queryset = PatientProfile.objects.all()
-    serializer_class = PatientProfileSerializer
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve', 'create']:
-            permission_classes = [IsDoctor | IsPatientOwner]
-        elif self.action in ['update', 'partial_update', 'destroy']:
-            permission_classes = [IsPatientOwner]
-        else:
-            permission_classes = [IsDoctor]
-        return [permission() for permission in permission_classes]
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def get_queryset(self):
-        user = self.request.user
-        if user.is_authenticated:
-            if user.is_staff:
-                return PatientProfile.objects.all()
-            elif hasattr(user, 'patientprofile'):
-                return PatientProfile.objects.filter(user=user)
-        return PatientProfile.objects.none()
+        if self.request.user.is_authenticated:
+            return User.objects.filter(id=self.request.user.id)
+        return User.objects.none()
 
-    @action(detail=False, methods=['get'])
-    def list_for_doctor(self, request):
-        patients = self.get_queryset()
-        serializer = DoctorPatientListSerializer(patients, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['get'])
-    def doctor_detail(self, request, pk=None):
-        patient = get_object_or_404(PatientProfile, pk=pk)
-        serializer = DoctorPatientDetailSerializer(patient)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['post'])
-    def add_doctor_note(self, request, pk=None):
-        patient = get_object_or_404(PatientProfile, pk=pk)
-        note_text = request.data.get('note_text')
-
-        if not note_text:
-            return Response({'error': 'Note text is required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        DoctorNote.objects.create(
-            patient=patient,
-            doctor=request.user,
-            note_text=note_text
-        )
-        serializer = DoctorPatientDetailSerializer(patient)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-# ViewSet لقراءات السكر
-class BloodGlucoseReadingViewSet(viewsets.ModelViewSet):
-    queryset = BloodGlucoseReading.objects.all()
-    serializer_class = BloodGlucoseReadingSerializer
-    permission_classes = [IsOwnerOrDoctor]
-
-    def get_queryset(self):
-        user = self.request.user
-        if user.is_authenticated:
-            if user.is_staff:
-                return BloodGlucoseReading.objects.all()
-            elif hasattr(user, 'patientprofile'):
-                return BloodGlucoseReading.objects.filter(patient=user.patientprofile)
-        return BloodGlucoseReading.objects.none()
-
-    def perform_create(self, serializer):
-        if hasattr(self.request.user, 'patientprofile'):
-            serializer.save(patient=self.request.user.patientprofile)
-        else:
-            raise serializers.ValidationError("Only patients can add blood glucose readings this way.")
-
-
-# ViewSet للأدوية
-class MedicationViewSet(viewsets.ModelViewSet):
-    queryset = Medication.objects.all()
-    serializer_class = MedicationSerializer
-    permission_classes = [IsOwnerOrDoctor]
-
-    def get_queryset(self):
-        user = self.request.user
-        if user.is_authenticated:
-            if user.is_staff:
-                return Medication.objects.all()
-            elif hasattr(user, 'patientprofile'):
-                return Medication.objects.filter(patient=user.patientprofile)
-        return Medication.objects.none()
-
-    def perform_create(self, serializer):
-        if hasattr(self.request.user, 'patientprofile'):
-            serializer.save(patient=self.request.user.patientprofile)
-        else:
-            raise serializers.ValidationError("Only patients can add medications this way.")
-
-
-# ViewSet لملاحظات الطبيب (إضافة وعرض)
-class DoctorNoteViewSet(viewsets.ModelViewSet):
-    queryset = DoctorNote.objects.all()
-    serializer_class = DoctorNoteSerializer
-    permission_classes = [IsDoctor | IsPatientOwner]
-
-    def get_queryset(self):
-        user = self.request.user
-        if user.is_authenticated:
-            if user.is_staff:
-                return DoctorNote.objects.filter(doctor=user)
-            elif hasattr(user, 'patientprofile'):
-                return DoctorNote.objects.filter(patient=user.patientprofile)
-        return DoctorNote.objects.none()
-
-    def perform_create(self, serializer):
-        if self.request.user.is_staff:
-            serializer.save(doctor=self.request.user)
-        else:
-            raise serializers.ValidationError("Only doctors can add notes.")
-
-    def get_permissions(self):
-        if self.action in ['update', 'partial_update', 'destroy']:
-            self.permission_classes = [IsDoctor]
-        else:
-            self.permission_classes = [IsDoctor | IsPatientOwner]
-        return super().get_permissions()
-
-# --- Viewset الجديد: AttachmentViewSet (للمرفقات) ---
-class AttachmentViewSet(viewsets.ModelViewSet):
-    queryset = Attachment.objects.all()
-    serializer_class = AttachmentSerializer
-    permission_classes = [permissions.IsAuthenticated] # فقط المستخدمين المسجلين
-
-    def get_queryset(self):
-        user = self.request.user
-        if user.is_authenticated:
-            if user.is_staff: # الأطباء بيشوفوا كل المرفقات
-                return Attachment.objects.all()
-            elif hasattr(user, 'patientprofile'): # المريض بيشوف مرفقاته بس
-                return Attachment.objects.filter(patient=user.patientprofile)
-        return Attachment.objects.none()
-
-    def perform_create(self, serializer):
-        # عند رفع مرفق جديد، نربطه بالمريض الذي قام بالرفع (إذا كان مريضاً)
-        if hasattr(self.request.user, 'patientprofile'):
-            serializer.save(patient=self.request.user.patientprofile)
-        else:
-            # إذا كان طبيب بيرفع، ممكن نحتاج منطق نحدد المريض اللي بيتبعه المرفق
-            # حالياً، فقط المريض بيقدر يرفع لنفسه
-            raise serializers.ValidationError("Only patients can upload attachments for themselves.")
-
-    # نعدل صلاحيات الحذف لتكون للمالك أو الطبيب
-    def get_permissions(self):
-        if self.action == 'destroy': # فقط المالك أو الطبيب بيقدر يحذف
-            self.permission_classes = [IsOwnerOrDoctor]
-        else: # باقي العمليات (عرض، إضافة)
-            self.permission_classes = [permissions.IsAuthenticated] # أي مستخدم مسجل دخول
-        return super().get_permissions()
-# --- نهاية AttachmentViewSet ---
-
-# View لتسجيل الدخول بالبريد الإلكتروني أو اسم المستخدم
-class ObtainAuthToken(OriginalObtainAuthToken):
+# --- Custom Auth Token View (لتسجيل الدخول) ---
+class CustomAuthToken(ObtainAuthToken):
     serializer_class = AuthTokenSerializer
 
     def post(self, request, *args, **kwargs):
@@ -211,9 +45,181 @@ class ObtainAuthToken(OriginalObtainAuthToken):
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
         token, created = Token.objects.get_or_create(user=user)
+
+        user_type = None
+        if hasattr(user, 'patientprofile'):
+            user_type = 'patient'
+        elif user.is_staff:
+            user_type = 'doctor'
+
         return Response({
             'token': token.key,
             'user_id': user.pk,
+            'username': user.username,
             'email': user.email,
-            'username': user.username
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'user_type': user_type
+        })
+
+# --- PatientProfile ViewSet ---
+class PatientProfileViewSet(viewsets.ModelViewSet):
+    queryset = PatientProfile.objects.all()
+    serializer_class = PatientProfileSerializer
+    permission_classes = [IsAuthenticated, IsPatientOwnerOrDoctor]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            if hasattr(user, 'patientprofile'):
+                return PatientProfile.objects.filter(user=user)
+            elif user.is_staff:
+                return PatientProfile.objects.all()
+        return PatientProfile.objects.none()
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+# --- BloodGlucoseReading ViewSet ---
+class BloodGlucoseReadingViewSet(viewsets.ModelViewSet):
+    queryset = BloodGlucoseReading.objects.all()
+    serializer_class = BloodGlucoseReadingSerializer
+    permission_classes = [IsAuthenticated, IsOwnerOrDoctor]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            if hasattr(user, 'patientprofile'):
+                return BloodGlucoseReading.objects.filter(patient=user.patientprofile).order_by('-reading_timestamp')
+            elif user.is_staff:
+                return BloodGlucoseReading.objects.all().order_by('-reading_timestamp')
+        return BloodGlucoseReading.objects.none()
+
+    def perform_create(self, serializer):
+        if hasattr(self.request.user, 'patientprofile'):
+            serializer.save(patient=self.request.user.patientprofile)
+        else:
+            raise serializers.ValidationError("Only patients can create blood glucose readings.")
+
+# --- Medication ViewSet ---
+class MedicationViewSet(viewsets.ModelViewSet):
+    queryset = Medication.objects.all()
+    serializer_class = MedicationSerializer
+    permission_classes = [IsAuthenticated, IsOwnerOrDoctor]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            if hasattr(user, 'patientprofile'):
+                return Medication.objects.filter(patient=user.patientprofile).order_by('-start_date')
+            elif user.is_staff:
+                return Medication.objects.all().order_by('-start_date')
+        return Medication.objects.none()
+
+    def perform_create(self, serializer):
+        if hasattr(self.request.user, 'patientprofile'):
+            serializer.save(patient=self.request.user.patientprofile)
+        else:
+            raise serializers.ValidationError("Only patients can add medications.")
+
+# --- DoctorNote ViewSet ---
+class DoctorNoteViewSet(viewsets.ModelViewSet):
+    queryset = DoctorNote.objects.all()
+    serializer_class = DoctorNoteSerializer
+    permission_classes = [IsAuthenticated, IsOwnerOrDoctor]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            if hasattr(user, 'patientprofile'):
+                return DoctorNote.objects.filter(patient=user.patientprofile).order_by('-timestamp')
+            elif user.is_staff:
+                return DoctorNote.objects.all().order_by('-timestamp')
+        return DoctorNote.objects.none()
+
+    def perform_create(self, serializer):
+        if self.request.user.is_staff:
+            serializer.save(doctor=self.request.user)
+        else:
+            raise serializers.ValidationError("Only doctors can create doctor notes.")
+
+# --- Attachment ViewSet ---
+class AttachmentViewSet(viewsets.ModelViewSet):
+    queryset = Attachment.objects.all()
+    serializer_class = AttachmentSerializer
+    permission_classes = [IsAuthenticated, IsOwnerOrDoctor]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            if hasattr(user, 'patientprofile'):
+                return Attachment.objects.filter(patient=user.patientprofile).order_by('-uploaded_at')
+            elif user.is_staff:
+                return Attachment.objects.all().order_by('-uploaded_at')
+        return Attachment.objects.none()
+
+    def perform_create(self, serializer):
+        if hasattr(self.request.user, 'patientprofile'):
+            serializer.save(patient=self.request.user.patientprofile)
+        else:
+            raise serializers.ValidationError("Only patients can upload attachments.")
+
+# --- Consultation ViewSet ---
+class ConsultationViewSet(viewsets.ModelViewSet):
+    queryset = Consultation.objects.all()
+    serializer_class = ConsultationSerializer
+    permission_classes = [IsAuthenticated, IsPatientOwnerOrDoctor]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            if hasattr(user, 'patientprofile'):
+                return Consultation.objects.filter(patient=user.patientprofile).order_by('-consultation_date', '-consultation_time')
+            elif user.is_staff:
+                return Consultation.objects.all().order_by('-consultation_date', '-consultation_time')
+        return Consultation.objects.none()
+
+    def perform_create(self, serializer):
+        if self.request.user.is_staff:
+            serializer.save(doctor=self.request.user)
+        else:
+            raise serializers.ValidationError("Only doctors can create consultations.")
+
+    def perform_update(self, serializer):
+        if self.request.user.is_staff:
+            serializer.save()
+        else:
+            raise serializers.ValidationError("Only doctors can update consultations.")
+
+    def perform_destroy(self, instance):
+        if self.request.user.is_staff:
+            instance.delete()
+        else:
+            raise serializers.ValidationError("Only doctors can delete consultations.")
+
+# View لتسجيل الدخول بالبريد الإلكتروني أو اسم المستخدم
+class CustomAuthToken(ObtainAuthToken):
+    serializer_class = AuthTokenSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data,
+                                           context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+        token, created = Token.objects.get_or_create(user=user)
+
+        user_type = None
+        if hasattr(user, 'patientprofile'):
+            user_type = 'patient'
+        elif user.is_staff:
+            user_type = 'doctor'
+
+        return Response({
+            'token': token.key,
+            'user_id': user.pk,
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'user_type': user_type
         })

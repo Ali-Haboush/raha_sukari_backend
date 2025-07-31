@@ -1,7 +1,7 @@
 # core/serializers.py
 
 from rest_framework import serializers
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
@@ -53,7 +53,7 @@ class UserSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
-# Serializer لملف تعريف المريض (تم التعديل)
+# Serializer لملف تعريف المريض
 class PatientProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
 
@@ -61,11 +61,7 @@ class PatientProfileSerializer(serializers.ModelSerializer):
     gender = serializers.CharField(required=False, allow_blank=True)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     phone_number = serializers.CharField(required=False, allow_blank=True)
-
-    # <--- تم التعديل هنا: profile_picture لم يعد للقراءة فقط
     profile_picture = serializers.ImageField(required=False, allow_null=True)
-    # --- نهاية التعديل ---
-
     medical_notes = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
@@ -73,12 +69,9 @@ class PatientProfileSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def update(self, instance, validated_data):
-        # <--- تم التعديل هنا: السماح بتحديث profile_picture
-        # يتم استثناء 'user' فقط، لأن 'profile_picture' سيتم التعامل معه
         for attr, value in validated_data.items():
-            if attr != 'user': # لا تستثني profile_picture هنا
+            if attr != 'user':
                 setattr(instance, attr, value)
-        # --- نهاية التعديل ---
 
         instance.save()
         return instance
@@ -118,6 +111,25 @@ class AttachmentSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(obj.file.url)
         return obj.file.url
 
+# --- NEW: Consultation Serializer ---
+class ConsultationSerializer(serializers.ModelSerializer):
+    patient = serializers.PrimaryKeyRelatedField(queryset=PatientProfile.objects.all(), required=False) # يمكن أن يتم تعيينه تلقائياً في ViewSet
+    doctor = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False) # يمكن أن يتم تعيينه تلقائياً في ViewSet
+
+    class Meta:
+        model = Consultation
+        fields = '__all__'
+        read_only_fields = ['created_at'] # تاريخ الإنشاء يُضاف تلقائياً
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        # عرض تفاصيل المريض والطبيب بدلاً من الـ ID فقط
+        if instance.patient:
+            representation['patient'] = PatientProfileSerializer(instance.patient, context=self.context).data
+        if instance.doctor:
+            representation['doctor'] = UserSerializer(instance.doctor, context=self.context).data
+        return representation
+
 # --- Serializers خاصة بواجهات الطبيب ---
 
 class DoctorPatientListSerializer(serializers.ModelSerializer):
@@ -133,6 +145,7 @@ class DoctorPatientDetailSerializer(serializers.ModelSerializer):
     medications = MedicationSerializer(many=True, read_only=True)
     doctor_notes = DoctorNoteSerializer(many=True, read_only=True)
     attachments = AttachmentSerializer(many=True, read_only=True)
+    consultations = ConsultationSerializer(many=True, read_only=True) # <--- تم إضافة هذا السطر
 
     class Meta:
         model = PatientProfile

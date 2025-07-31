@@ -1,28 +1,26 @@
 # rahat_sukari/urls.py
 
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from rest_framework.routers import DefaultRouter
-
-# استيراد الأشياء الخاصة بـ drf-yasg
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
-
-from core.views import ObtainAuthToken
-
-from core import views
-
-# مهم جداً: استيراد لإعدادات الملفات الـ static والـ media في وضع التطوير
 from django.conf import settings
 from django.conf.urls.static import static
 
-# إعدادات الـ schema (صفحة التوثيق)
+from core.views import (
+    UserViewSet, CustomAuthToken, PatientProfileViewSet,
+    BloodGlucoseReadingViewSet, MedicationViewSet, DoctorNoteViewSet,
+    AttachmentViewSet, ConsultationViewSet # <--- تم إضافة ConsultationViewSet هنا
+)
+
+# إعدادات Swagger/OpenAPI
 schema_view = get_schema_view(
     openapi.Info(
         title="Rahat Sukari API",
         default_version='v1',
-        description="API documentation for Rahat Sukari Diabetes Monitoring Application",
+        description="API documentation for Rahat Sukari Diabetes Management System",
         terms_of_service="https://www.google.com/policies/terms/",
         contact=openapi.Contact(email="contact@rahatsukari.local"),
         license=openapi.License(name="BSD License"),
@@ -31,30 +29,28 @@ schema_view = get_schema_view(
     permission_classes=(permissions.AllowAny,),
 )
 
-
-# إنشاء Router لـ DRF
+# إعدادات Router لـ ViewSets
 router = DefaultRouter()
-router.register(r'users', views.UserViewSet)
-router.register(r'patients', views.PatientProfileViewSet)
-router.register(r'readings', views.BloodGlucoseReadingViewSet)
-router.register(r'medications', views.MedicationViewSet)
-router.register(r'doctor_notes', views.DoctorNoteViewSet)
-router.register(r'attachments', views.AttachmentViewSet) # <--- تم إضافة هذا السطر الجديد
+router.register(r'users', UserViewSet, basename='user')
+router.register(r'patients', PatientProfileViewSet, basename='patient')
+router.register(r'glucose-readings', BloodGlucoseReadingViewSet, basename='glucose-reading')
+router.register(r'medications', MedicationViewSet, basename='medication')
+router.register(r'doctor-notes', DoctorNoteViewSet, basename='doctor-note')
+router.register(r'attachments', AttachmentViewSet, basename='attachment')
+router.register(r'consultations', ConsultationViewSet, basename='consultation') # <--- تم إضافة هذا السطر
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
-    path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
+    path('api/token/', CustomAuthToken.as_view(), name='api_token_auth'),
 
-    path('api/token/', ObtainAuthToken.as_view(), name='obtain-auth-token'),
-
-    # مسارات التوثيق (Swagger UI)
-    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
-    path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
-    path('swagger.json', schema_view.without_ui(cache_timeout=0), name='schema-json'),
+    # مسارات Swagger UI
+    re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
+    re_path(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    re_path(r'^redoc/$', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 ]
 
-# مهم جداً: إضافة مسارات لخدمة الملفات الـ static والـ media في وضع التطوير (DEBUG = True)
+# إضافة مسارات لخدمة الملفات الثابتة والوسائط في وضع التطوير
 if settings.DEBUG:
-    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
