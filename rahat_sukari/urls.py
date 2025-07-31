@@ -12,7 +12,8 @@ from django.conf.urls.static import static
 from core.views import (
     UserViewSet, CustomAuthToken, PatientProfileViewSet,
     BloodGlucoseReadingViewSet, MedicationViewSet, DoctorNoteViewSet,
-    AttachmentViewSet, ConsultationViewSet # <--- تم إضافة ConsultationViewSet هنا
+    AttachmentViewSet, ConsultationViewSet,
+    generate_pdf_report # <--- تم إضافة هذه الدالة
 )
 
 # إعدادات Swagger/OpenAPI
@@ -37,12 +38,16 @@ router.register(r'glucose-readings', BloodGlucoseReadingViewSet, basename='gluco
 router.register(r'medications', MedicationViewSet, basename='medication')
 router.register(r'doctor-notes', DoctorNoteViewSet, basename='doctor-note')
 router.register(r'attachments', AttachmentViewSet, basename='attachment')
-router.register(r'consultations', ConsultationViewSet, basename='consultation') # <--- تم إضافة هذا السطر
+router.register(r'consultations', ConsultationViewSet, basename='consultation')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/token/', CustomAuthToken.as_view(), name='api_token_auth'),
+
+    # <--- مسار جديد لتوليد تقرير PDF
+    path('api/consultations/<int:consultation_id>/generate_pdf/', generate_pdf_report, name='generate-pdf-report'),
+    # --- نهاية المسار الجديد ---
 
     # مسارات Swagger UI
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),

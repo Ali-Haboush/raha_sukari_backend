@@ -8,22 +8,29 @@ from rest_framework.authtoken.models import Token
 from rest_framework import filters
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
+from django.template.loader import render_to_string
+from django.http import HttpResponse
+from weasyprint import HTML, CSS
+from django.utils import timezone
+import os
 
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation
+# تأكد من أن هذا الاستيراد صحيح
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, User
 from .serializers import (
     UserSerializer, PatientProfileSerializer, BloodGlucoseReadingSerializer,
     MedicationSerializer, DoctorNoteSerializer, AttachmentSerializer,
     AuthTokenSerializer, DoctorPatientListSerializer, DoctorPatientDetailSerializer,
     ConsultationSerializer
 )
-from django.contrib.auth.models import User # تم استيراد User هنا
-from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor # <--- تم تصحيح IsPatient إلى IsPatientOwner
+# <--- هذا هو السطر الذي تم تصحيحه: IsPatientOwner بدلاً من IsPatient
+from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor 
 
-# --- User ViewSet (لإنشاء المستخدمين) ---
+# --- User ViewSet ---
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [AllowAny] # يمكن لأي شخص إنشاء مستخدم جديد (تسجيل)
+    permission_classes = [AllowAny]
 
     def get_permissions(self):
         if self.action == 'create':
@@ -35,7 +42,7 @@ class UserViewSet(viewsets.ModelViewSet):
             return User.objects.filter(id=self.request.user.id)
         return User.objects.none()
 
-# --- Custom Auth Token View (لتسجيل الدخول) ---
+# --- Custom Auth Token View ---
 class CustomAuthToken(ObtainAuthToken):
     serializer_class = AuthTokenSerializer
 
@@ -196,6 +203,36 @@ class ConsultationViewSet(viewsets.ModelViewSet):
             instance.delete()
         else:
             raise serializers.ValidationError("Only doctors can delete consultations.")
+
+# --- PDF Report View ---
+def generate_pdf_report(request, consultation_id):
+    consultation = get_object_or_404(Consultation, id=consultation_id)
+
+    user = request.user
+    if not user.is_authenticated:
+        return HttpResponse("غير مصرح لك بالدخول. يرجى تسجيل الدخول.", status=status.HTTP_401_UNAUTHORIZED)
+
+    if hasattr(user, 'patientprofile') and user.patientprofile != consultation.patient:
+        return HttpResponse("غير مصرح لك بالوصول لهذا التقرير.", status=status.HTTP_403_FORBIDDEN)
+
+    if user.is_staff and consultation.doctor != user:
+        pass 
+
+    context = {
+        'consultation': consultation,
+        'patient': consultation.patient,
+        'doctor': consultation.doctor,
+        'now': timezone.now(),
+    }
+
+    html_string = render_to_string('core/consultation_report.html', context)
+    html = HTML(string=html_string)
+
+    pdf_file = html.write_pdf()
+
+    response = HttpResponse(pdf_file, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="consultation_report_{consultation.id}.pdf"'
+    return response
 
 # View لتسجيل الدخول بالبريد الإلكتروني أو اسم المستخدم
 class CustomAuthToken(ObtainAuthToken):

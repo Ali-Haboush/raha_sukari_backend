@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <title>تقرير استشارة طبية</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 40px;
+            background-color: #f8f8f8;
+            color: #333;
+            direction: rtl;
+            /* Required for RTL text */
+            text-align: right;
+            /* Align text to the right */
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+        }
+
+        h1,
+        h2,
+        h3 {
+            color: #0056b3;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+
+        .section {
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px dashed #eee;
+        }
+
+        .section:last-child {
+            border-bottom: none;
+        }
+
+        p {
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        strong {
+            color: #0056b3;
+        }
+
+        .header,
+        .footer {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #666;
+        }
+
+        .logo {
+            float: left;
+            /* Align logo to the left in RTL */
+            margin-left: 20px;
+            /* Space from right edge */
+        }
+
+        .logo img {
+            max-width: 80px;
+            height: auto;
+        }
+
+        .info-item {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>تقرير استشارة طبية - راحة سكري</h1>
+        </div>
+
+        <div class="section">
+            <h2>بيانات المريض</h2>
+            <p class="info-item"><strong>اسم المريض:</strong> {{ patient.user.first_name }} {{ patient.user.last_name }}
+            </p>
+            <p class="info-item"><strong>تاريخ الميلاد:</strong> {{ patient.date_of_birth|default:"غير متوفر" }}</p>
+            <p class="info-item"><strong>الجنس:</strong> {{ patient.get_gender_display|default:"غير متوفر" }}</p>
+            <p class="info-item"><strong>رقم الهاتف:</strong> {{ patient.phone_number|default:"غير متوفر" }}</p>
+            <p class="info-item"><strong>نوع السكري:</strong> {{ patient.get_diabetes_type_display|default:"غير متوفر"
+                }}</p>
+        </div>
+
+        <div class="section">
+            <h2>تفاصيل الاستشارة</h2>
+            <p class="info-item"><strong>تاريخ الاستشارة:</strong> {{ consultation.consultation_date }}</p>
+            <p class="info-item"><strong>وقت الاستشارة:</strong> {{ consultation.consultation_time }}</p>
+            <p class="info-item"><strong>الطبيب المعالج:</strong> {{ consultation.doctor.first_name }} {{
+                consultation.doctor.last_name }} ({{ consultation.doctor.email }})</p>
+            <p class="info-item"><strong>التشخيص:</strong> {{ consultation.diagnosis|default:"لا يوجد" }}</p>
+            <p class="info-item"><strong>العلاج الموصى به:</strong> {{ consultation.treatment|default:"لا يوجد" }}</p>
+            <p class="info-item"><strong>ملاحظات إضافية:</strong> {{ consultation.notes|default:"لا يوجد" }}</p>
+        </div>
+
+        <div class="footer">
+            <p>تم إنشاء هذا التقرير بتاريخ: {{ now|date:"Y-m-d H:i:s" }}</p>
+            <p>تطبيق راحة سكري &copy; 2025</p>
+        </div>
+    </div>
+</body>
+
+</html>
