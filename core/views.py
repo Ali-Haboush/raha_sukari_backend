@@ -15,7 +15,11 @@ from weasyprint import HTML, CSS
 from django.utils import timezone
 import os
 
-# تأكد من أن هذا الاستيراد صحيح
+# استيرادات جديدة للديكورات (Decorators)
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.authentication import TokenAuthentication, SessionAuthentication
+
+
 from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, User
 from .serializers import (
     UserSerializer, PatientProfileSerializer, BloodGlucoseReadingSerializer,
@@ -23,8 +27,7 @@ from .serializers import (
     AuthTokenSerializer, DoctorPatientListSerializer, DoctorPatientDetailSerializer,
     ConsultationSerializer
 )
-# <--- هذا هو السطر الذي تم تصحيحه: IsPatientOwner بدلاً من IsPatient
-from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor 
+from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor
 
 # --- User ViewSet ---
 class UserViewSet(viewsets.ModelViewSet):
@@ -87,10 +90,10 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-# --- BloodGlucoseReading ViewSet ---
+# --- BloodGlucoseReading ViewSet (تم تصحيح اسم الـ Serializer) ---
 class BloodGlucoseReadingViewSet(viewsets.ModelViewSet):
     queryset = BloodGlucoseReading.objects.all()
-    serializer_class = BloodGlucoseReadingSerializer
+    serializer_class = BloodGlucoseReadingSerializer # <--- تم تصحيح هذا السطر
     permission_classes = [IsAuthenticated, IsOwnerOrDoctor]
 
     def get_queryset(self):
@@ -205,6 +208,9 @@ class ConsultationViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError("Only doctors can delete consultations.")
 
 # --- PDF Report View ---
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsDoctor | IsPatientOwnerOrDoctor])
 def generate_pdf_report(request, consultation_id):
     consultation = get_object_or_404(Consultation, id=consultation_id)
 
@@ -215,7 +221,7 @@ def generate_pdf_report(request, consultation_id):
     if hasattr(user, 'patientprofile') and user.patientprofile != consultation.patient:
         return HttpResponse("غير مصرح لك بالوصول لهذا التقرير.", status=status.HTTP_403_FORBIDDEN)
 
-    if user.is_staff and consultation.doctor != user:
+    if user.is_staff and user != consultation.doctor:
         pass 
 
     context = {
