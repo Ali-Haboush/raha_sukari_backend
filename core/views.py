@@ -1,11 +1,10 @@
 # core/views.py
 
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, filters
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
-from rest_framework import filters
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -15,16 +14,17 @@ from weasyprint import HTML, CSS
 from django.utils import timezone
 import os
 
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes, action
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication
 
 
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert, User
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert, User, DoctorProfile, FavoriteDoctor
 from .serializers import (
     UserSerializer, PatientProfileSerializer, BloodGlucoseReadingSerializer,
     MedicationSerializer, DoctorNoteSerializer, AttachmentSerializer,
     AuthTokenSerializer, DoctorPatientListSerializer, DoctorPatientDetailSerializer,
-    ConsultationSerializer, AlertSerializer # تم إضافة AlertSerializer
+    ConsultationSerializer, AlertSerializer,
+    DoctorProfileSerializer, FavoriteDoctorSerializer
 )
 from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor
 
@@ -206,11 +206,11 @@ class ConsultationViewSet(viewsets.ModelViewSet):
         else:
             raise serializers.ValidationError("Only doctors can delete consultations.")
 
-# --- NEW: Alert (Notification) ViewSet ---
+# --- Alert ViewSet ---
 class AlertViewSet(viewsets.ModelViewSet):
     queryset = Alert.objects.all()
     serializer_class = AlertSerializer
-    permission_classes = [IsAuthenticated, IsPatientOwnerOrDoctor] # المريض يرى تنبيهاته، الطبيب يرى تنبيهات مرضاه
+    permission_classes = [IsAuthenticated, IsPatientOwnerOrDoctor]
 
     def get_queryset(self):
         user = self.request.user
@@ -218,38 +218,63 @@ class AlertViewSet(viewsets.ModelViewSet):
             if hasattr(user, 'patientprofile'):
                 return Alert.objects.filter(patient=user.patientprofile).order_by('-timestamp')
             elif user.is_staff:
-                return Alert.objects.all().order_by('-timestamp') # الطبيب يرى كل تنبيهات مرضاه
+                return Alert.objects.all().order_by('-timestamp')
         return Alert.objects.none()
 
     def perform_create(self, serializer):
-        # الطبيب هو من ينشئ التنبيهات للمرضى
         if self.request.user.is_staff:
-            # يجب أن يأتي الـ patient_id في الـ request.data
             serializer.save(sender_user=self.request.user)
         else:
-            # المريض لا يمكنه إنشاء تنبيهات لنفسه
             raise serializers.ValidationError("Only doctors can create alerts.")
 
     def perform_update(self, serializer):
-        # المريض يمكنه فقط تعديل is_read على تنبيهاته
         if hasattr(self.request.user, 'patientprofile'):
             if 'is_read' in serializer.validated_data:
                 serializer.save(is_read=serializer.validated_data['is_read'])
             else:
                 raise serializers.ValidationError("Patients can only update 'is_read' status on alerts.")
-        # الطبيب يمكنه تحديث أي حقل في التنبيه
         elif self.request.user.is_staff:
             serializer.save()
         else:
             raise permissions.AccessDenied("غير مصرح لك بتعديل هذا التنبيه.")
 
     def perform_destroy(self, instance):
-        # الحذف فقط من قبل الطبيب
         if self.request.user.is_staff:
             instance.delete()
         else:
             raise permissions.AccessDenied("غير مصرح لك بحذف هذا التنبيه.")
-# --- نهاية Alert ViewSet ---
+
+# --- DoctorProfile ViewSet ---
+class DoctorViewSet(viewsets.ModelViewSet):
+    queryset = DoctorProfile.objects.all()
+    serializer_class = DoctorProfileSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return DoctorProfile.objects.filter(user__is_staff=True).order_by('user__first_name')
+
+    @action(detail=True, methods=['post'], permission_classes=[IsPatientOwner])
+    def favorite(self, request, pk=None):
+        doctor = get_object_or_404(DoctorProfile, pk=pk)
+        patient_profile = request.user.patientprofile
+
+        favorite, created = FavoriteDoctor.objects.get_or_create(patient=patient_profile, doctor=doctor)
+
+        if created:
+            return Response({'status': 'تم إضافة الطبيب إلى المفضلة'}, status=status.HTTP_201_CREATED)
+        else:
+            return Response({'status': 'هذا الطبيب موجود بالفعل في المفضلة'}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['delete'], permission_classes=[IsPatientOwner])
+    def unfavorite(self, request, pk=None):
+        doctor = get_object_or_404(DoctorProfile, pk=pk)
+        patient_profile = request.user.patientprofile
+
+        favorite = get_object_or_404(FavoriteDoctor, patient=patient_profile, doctor=doctor)
+        favorite.delete()
+
+        return Response({'status': 'تم حذف الطبيب من المفضلة'}, status=status.HTTP_204_NO_CONTENT)
+
 
 # --- PDF Report View ---
 @api_view(['GET'])

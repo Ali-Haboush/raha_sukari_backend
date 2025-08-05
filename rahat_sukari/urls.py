@@ -12,7 +12,8 @@ from django.conf.urls.static import static
 from core.views import (
     UserViewSet, CustomAuthToken, PatientProfileViewSet,
     BloodGlucoseReadingViewSet, MedicationViewSet, DoctorNoteViewSet,
-    AttachmentViewSet, ConsultationViewSet, AlertViewSet, # تم إضافة AlertViewSet
+    AttachmentViewSet, ConsultationViewSet, AlertViewSet,
+    DoctorViewSet, # <--- تم إضافة DoctorViewSet هنا
     generate_pdf_report
 )
 
@@ -39,7 +40,8 @@ router.register(r'medications', MedicationViewSet, basename='medication')
 router.register(r'doctor-notes', DoctorNoteViewSet, basename='doctor-note')
 router.register(r'attachments', AttachmentViewSet, basename='attachment')
 router.register(r'consultations', ConsultationViewSet, basename='consultation')
-router.register(r'alerts', AlertViewSet, basename='alert') # تم إضافة هذا السطر الجديد
+router.register(r'alerts', AlertViewSet, basename='alert')
+router.register(r'doctors', DoctorViewSet, basename='doctor') # <--- تم إضافة هذا السطر الجديد
 
 urlpatterns = [
     path('admin/', admin.site.urls),

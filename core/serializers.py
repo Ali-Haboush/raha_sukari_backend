@@ -1,7 +1,7 @@
 # core/serializers.py
 
 from rest_framework import serializers
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert # تم إضافة Alert
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert, DoctorProfile, FavoriteDoctor
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
@@ -129,16 +129,15 @@ class ConsultationSerializer(serializers.ModelSerializer):
             representation['doctor'] = UserSerializer(instance.doctor, context=self.context).data
         return representation
 
-# --- NEW: Alert Serializer ---
+# Serializer للتنبيهات
 class AlertSerializer(serializers.ModelSerializer):
-    # عرض تفاصيل المريض والراسل بدلاً من الـ ID فقط
-    patient = serializers.PrimaryKeyRelatedField(queryset=PatientProfile.objects.all(), required=False) # يُضبط تلقائياً من الـ ViewSet
-    sender_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True) # يُضبط تلقائياً من الـ ViewSet
+    patient = serializers.PrimaryKeyRelatedField(queryset=PatientProfile.objects.all(), required=False)
+    sender_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = Alert
         fields = '__all__'
-        read_only_fields = ['timestamp'] # تاريخ الإنشاء يُضاف تلقائياً
+        read_only_fields = ['timestamp']
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
@@ -150,10 +149,27 @@ class AlertSerializer(serializers.ModelSerializer):
             representation['related_reading'] = BloodGlucoseReadingSerializer(instance.related_reading, context=self.context).data
         return representation
 
-# --- نهاية Alert Serializer ---
+# --- NEW: DoctorProfile Serializer ---
+class DoctorProfileSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    # لإظهار المتابعين
+    favorited_by_patients_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DoctorProfile
+        fields = '__all__'
+        read_only_fields = ['average_rating']
+
+    def get_favorited_by_patients_count(self, obj):
+        return obj.favorited_by_patients.count()
+
+# --- NEW: FavoriteDoctor Serializer ---
+class FavoriteDoctorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FavoriteDoctor
+        fields = '__all__'
 
 # --- Serializers خاصة بواجهات الطبيب ---
-
 class DoctorPatientListSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
 
@@ -168,7 +184,7 @@ class DoctorPatientDetailSerializer(serializers.ModelSerializer):
     doctor_notes = DoctorNoteSerializer(many=True, read_only=True)
     attachments = AttachmentSerializer(many=True, read_only=True)
     consultations = ConsultationSerializer(many=True, read_only=True)
-    alerts = AlertSerializer(many=True, read_only=True) # تم إضافة هذا السطر
+    alerts = AlertSerializer(many=True, read_only=True)
 
     class Meta:
         model = PatientProfile

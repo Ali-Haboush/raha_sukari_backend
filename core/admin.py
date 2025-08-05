@@ -1,7 +1,7 @@
 # core/admin.py
 
 from django.contrib import admin
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert # تم إضافة Alert
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert, DoctorProfile, FavoriteDoctor
 
 # تسجيل PatientProfile في لوحة الإدارة
 @admin.register(PatientProfile)
@@ -51,11 +51,26 @@ class ConsultationAdmin(admin.ModelAdmin):
     list_filter = ('consultation_date', 'doctor')
     raw_id_fields = ('patient', 'doctor')
 
-# --- NEW: تسجيل Alert في لوحة الإدارة ---
+# تسجيل Alert في لوحة الإدارة
 @admin.register(Alert)
 class AlertAdmin(admin.ModelAdmin):
     list_display = ('patient', 'alert_type', 'message', 'is_read', 'timestamp', 'sender_user')
     search_fields = ('patient__user__username', 'alert_type', 'message')
     list_filter = ('alert_type', 'is_read', 'timestamp')
     raw_id_fields = ('patient', 'sender_user', 'related_reading')
-# --- نهاية Alert Admin ---
+
+# --- NEW: تسجيل DoctorProfile في لوحة الإدارة ---
+@admin.register(DoctorProfile)
+class DoctorProfileAdmin(admin.ModelAdmin):
+    list_display = ('user', 'specialty', 'address', 'phone_number', 'is_available', 'average_rating')
+    search_fields = ('user__first_name', 'user__last_name', 'specialty', 'address')
+    list_filter = ('is_available', 'specialty', 'average_rating')
+    raw_id_fields = ('user',)
+
+# --- NEW: تسجيل FavoriteDoctor في لوحة الإدارة ---
+@admin.register(FavoriteDoctor)
+class FavoriteDoctorAdmin(admin.ModelAdmin):
+    list_display = ('patient', 'doctor')
+    search_fields = ('patient__user__username', 'doctor__user__username')
+    list_filter = ('patient__user__username',)
+    raw_id_fields = ('patient', 'doctor')

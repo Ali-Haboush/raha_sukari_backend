@@ -5,15 +5,47 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 import os
-from django.utils import timezone # تم إضافة هذا الاستيراد
+from django.utils import timezone
 
-# دالة لمسار حفظ الصورة الشخصية
+# دالة لمسار حفظ الصورة الشخصية للمريض
 def patient_profile_picture_path(instance, filename):
-    return f'profile_pics/user_{instance.user.id}/{filename}'
+    return f'profile_pics/patient_{instance.user.id}/{filename}'
+
+# دالة لمسار حفظ صورة الطبيب
+def doctor_profile_picture_path(instance, filename):
+    return f'profile_pics/doctor_{instance.user.id}/{filename}'
 
 # دالة لمسار حفظ المرفقات
 def attachment_file_path(instance, filename):
     return f'attachments/patient_{instance.patient.id}/{filename}'
+
+# --- NEW: DoctorProfile Model ---
+class DoctorProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='doctorprofile')
+    specialty = models.CharField(max_length=255, verbose_name="التخصص")
+    address = models.CharField(max_length=255, verbose_name="العنوان")
+    phone_number = models.CharField(max_length=20, verbose_name="رقم الهاتف")
+    bio = models.TextField(blank=True, null=True, verbose_name="نبذة عن الطبيب")
+    profile_picture = models.ImageField(upload_to=doctor_profile_picture_path, blank=True, null=True, verbose_name="صورة الطبيب")
+    average_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00, verbose_name="متوسط التقييم")
+    is_available = models.BooleanField(default=True, verbose_name="متاح الآن")
+
+    def __str__(self):
+        return f"Dr. {self.user.first_name} {self.user.last_name} - {self.specialty}"
+
+# --- NEW: FavoriteDoctor Model ---
+class FavoriteDoctor(models.Model):
+    patient = models.ForeignKey('PatientProfile', on_delete=models.CASCADE, related_name='favorite_doctors')
+    doctor = models.ForeignKey('DoctorProfile', on_delete=models.CASCADE, related_name='favorited_by_patients')
+
+    class Meta:
+        unique_together = ('patient', 'doctor')
+        verbose_name = "طبيب مفضل"
+        verbose_name_plural = "الأطباء المفضلون"
+
+    def __str__(self):
+        return f"Patient {self.patient.user.username} favorited Dr. {self.doctor.user.username}"
+
 
 # --- PatientProfile Model ---
 class PatientProfile(models.Model):
@@ -32,13 +64,16 @@ class PatientProfile(models.Model):
 
 # Signal لإنشاء PatientProfile تلقائياً عند إنشاء User جديد
 @receiver(post_save, sender=User)
-def create_user_profile(sender, instance, created, **kwargs):
-    if created:
+def create_or_update_patient_profile(sender, instance, created, **kwargs):
+    if not instance.is_staff and not hasattr(instance, 'patientprofile'):
         PatientProfile.objects.create(user=instance)
 
+# Signal لإنشاء DoctorProfile تلقائياً عند إنشاء User جديد بـ is_staff=True
 @receiver(post_save, sender=User)
-def save_user_profile(sender, instance, **kwargs):
-    instance.patientprofile.save()
+def create_or_update_doctor_profile(sender, instance, created, **kwargs):
+    if instance.is_staff and not hasattr(instance, 'doctorprofile'):
+        DoctorProfile.objects.create(user=instance)
+
 
 # --- BloodGlucoseReading Model ---
 class BloodGlucoseReading(models.Model):
@@ -106,10 +141,9 @@ class Consultation(models.Model):
     def __str__(self):
         return f"Consultation for {self.patient.user.username} by Dr. {self.doctor.first_name if self.doctor else 'N/A'} on {self.consultation_date}"
 
-# --- NEW: Alert (Notification) Model ---
+# --- Alert (Notification) Model ---
 class Alert(models.Model):
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='alerts', verbose_name="المريض")
-    # ممكن يرسل من طبيب، أو يكون تنبيه تلقائي، فنخليه اختياري
     sender_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="المرسل")
     message = models.TextField(verbose_name="نص التنبيه")
 
@@ -126,14 +160,10 @@ class Alert(models.Model):
     is_read = models.BooleanField(default=False, verbose_name="تمت القراءة")
     timestamp = models.DateTimeField(auto_now_add=True, verbose_name="وقت التنبيه")
 
-    # ربط التنبيه بقراءة سكر معينة لو كان التنبيه بسببها (اختياري)
     related_reading = models.ForeignKey(BloodGlucoseReading, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="قراءة السكر المرتبطة")
 
     class Meta:
-        ordering = ['-timestamp'] # ترتيب التنبيهات من الأحدث للأقدم
+        ordering = ['-timestamp']
         verbose_name = "تنبيه / إشعار"
+       
         verbose_name_plural = "التنبيهات / الإشعارات"
-
-    def __str__(self):
-        return f"تنبيه لـ {self.patient.user.username} - {self.get_alert_type_display()} ({'مقروء' if self.is_read else 'غير مقروء'})"
-# --- نهاية Alert Model ---
