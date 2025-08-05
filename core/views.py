@@ -15,17 +15,16 @@ from weasyprint import HTML, CSS
 from django.utils import timezone
 import os
 
-# استيرادات جديدة للديكورات (Decorators)
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication
 
 
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, User
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert, User
 from .serializers import (
     UserSerializer, PatientProfileSerializer, BloodGlucoseReadingSerializer,
     MedicationSerializer, DoctorNoteSerializer, AttachmentSerializer,
     AuthTokenSerializer, DoctorPatientListSerializer, DoctorPatientDetailSerializer,
-    ConsultationSerializer
+    ConsultationSerializer, AlertSerializer # تم إضافة AlertSerializer
 )
 from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor
 
@@ -90,10 +89,10 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-# --- BloodGlucoseReading ViewSet (تم تصحيح اسم الـ Serializer) ---
+# --- BloodGlucoseReading ViewSet ---
 class BloodGlucoseReadingViewSet(viewsets.ModelViewSet):
     queryset = BloodGlucoseReading.objects.all()
-    serializer_class = BloodGlucoseReadingSerializer # <--- تم تصحيح هذا السطر
+    serializer_class = BloodGlucoseReadingSerializer
     permission_classes = [IsAuthenticated, IsOwnerOrDoctor]
 
     def get_queryset(self):
@@ -206,6 +205,51 @@ class ConsultationViewSet(viewsets.ModelViewSet):
             instance.delete()
         else:
             raise serializers.ValidationError("Only doctors can delete consultations.")
+
+# --- NEW: Alert (Notification) ViewSet ---
+class AlertViewSet(viewsets.ModelViewSet):
+    queryset = Alert.objects.all()
+    serializer_class = AlertSerializer
+    permission_classes = [IsAuthenticated, IsPatientOwnerOrDoctor] # المريض يرى تنبيهاته، الطبيب يرى تنبيهات مرضاه
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            if hasattr(user, 'patientprofile'):
+                return Alert.objects.filter(patient=user.patientprofile).order_by('-timestamp')
+            elif user.is_staff:
+                return Alert.objects.all().order_by('-timestamp') # الطبيب يرى كل تنبيهات مرضاه
+        return Alert.objects.none()
+
+    def perform_create(self, serializer):
+        # الطبيب هو من ينشئ التنبيهات للمرضى
+        if self.request.user.is_staff:
+            # يجب أن يأتي الـ patient_id في الـ request.data
+            serializer.save(sender_user=self.request.user)
+        else:
+            # المريض لا يمكنه إنشاء تنبيهات لنفسه
+            raise serializers.ValidationError("Only doctors can create alerts.")
+
+    def perform_update(self, serializer):
+        # المريض يمكنه فقط تعديل is_read على تنبيهاته
+        if hasattr(self.request.user, 'patientprofile'):
+            if 'is_read' in serializer.validated_data:
+                serializer.save(is_read=serializer.validated_data['is_read'])
+            else:
+                raise serializers.ValidationError("Patients can only update 'is_read' status on alerts.")
+        # الطبيب يمكنه تحديث أي حقل في التنبيه
+        elif self.request.user.is_staff:
+            serializer.save()
+        else:
+            raise permissions.AccessDenied("غير مصرح لك بتعديل هذا التنبيه.")
+
+    def perform_destroy(self, instance):
+        # الحذف فقط من قبل الطبيب
+        if self.request.user.is_staff:
+            instance.delete()
+        else:
+            raise permissions.AccessDenied("غير مصرح لك بحذف هذا التنبيه.")
+# --- نهاية Alert ViewSet ---
 
 # --- PDF Report View ---
 @api_view(['GET'])

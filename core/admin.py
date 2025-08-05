@@ -1,7 +1,7 @@
 # core/admin.py
 
 from django.contrib import admin
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert # تم إضافة Alert
 
 # تسجيل PatientProfile في لوحة الإدارة
 @admin.register(PatientProfile)
@@ -9,7 +9,7 @@ class PatientProfileAdmin(admin.ModelAdmin):
     list_display = ('user', 'gender', 'date_of_birth', 'phone_number', 'diabetes_type', 'diagnosis_date')
     search_fields = ('user__username', 'user__first_name', 'user__last_name', 'phone_number')
     list_filter = ('gender', 'diabetes_type')
-    raw_id_fields = ('user',) # لتحسين أداء البحث عن المستخدمين
+    raw_id_fields = ('user',)
 
 # تسجيل BloodGlucoseReading في لوحة الإدارة
 @admin.register(BloodGlucoseReading)
@@ -43,10 +43,19 @@ class AttachmentAdmin(admin.ModelAdmin):
     list_filter = ('uploaded_at',)
     raw_id_fields = ('patient',)
 
-# --- NEW: تسجيل Consultation في لوحة الإدارة ---
+# تسجيل Consultation في لوحة الإدارة
 @admin.register(Consultation)
 class ConsultationAdmin(admin.ModelAdmin):
     list_display = ('patient', 'doctor', 'consultation_date', 'consultation_time', 'diagnosis')
     search_fields = ('patient__user__username', 'doctor__username', 'diagnosis', 'treatment')
     list_filter = ('consultation_date', 'doctor')
     raw_id_fields = ('patient', 'doctor')
+
+# --- NEW: تسجيل Alert في لوحة الإدارة ---
+@admin.register(Alert)
+class AlertAdmin(admin.ModelAdmin):
+    list_display = ('patient', 'alert_type', 'message', 'is_read', 'timestamp', 'sender_user')
+    search_fields = ('patient__user__username', 'alert_type', 'message')
+    list_filter = ('alert_type', 'is_read', 'timestamp')
+    raw_id_fields = ('patient', 'sender_user', 'related_reading')
+# --- نهاية Alert Admin ---

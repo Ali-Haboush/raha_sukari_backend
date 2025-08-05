@@ -5,15 +5,14 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 import os
+from django.utils import timezone # تم إضافة هذا الاستيراد
 
 # دالة لمسار حفظ الصورة الشخصية
 def patient_profile_picture_path(instance, filename):
-    # file will be uploaded to MEDIA_ROOT/profile_pics/user_<id>/<filename>
     return f'profile_pics/user_{instance.user.id}/{filename}'
 
 # دالة لمسار حفظ المرفقات
 def attachment_file_path(instance, filename):
-    # file will be uploaded to MEDIA_ROOT/attachments/patient_<id>/<filename>
     return f'attachments/patient_{instance.patient.id}/{filename}'
 
 # --- PatientProfile Model ---
@@ -85,13 +84,12 @@ class Attachment(models.Model):
         return f"Attachment for {self.patient.user.username}: {self.file.name}"
 
     def delete(self, *args, **kwargs):
-        # Delete the actual file from the file system
         if self.file:
             if os.path.isfile(self.file.path):
                 os.remove(self.file.path)
         super().delete(*args, **kwargs)
 
-# --- NEW: Consultation Model ---
+# --- Consultation Model ---
 class Consultation(models.Model):
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='consultations')
     doctor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='doctor_consultations')
@@ -103,7 +101,39 @@ class Consultation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-consultation_date', '-consultation_time'] # ترتيب تنازلي حسب التاريخ والوقت
+        ordering = ['-consultation_date', '-consultation_time']
 
     def __str__(self):
         return f"Consultation for {self.patient.user.username} by Dr. {self.doctor.first_name if self.doctor else 'N/A'} on {self.consultation_date}"
+
+# --- NEW: Alert (Notification) Model ---
+class Alert(models.Model):
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='alerts', verbose_name="المريض")
+    # ممكن يرسل من طبيب، أو يكون تنبيه تلقائي، فنخليه اختياري
+    sender_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="المرسل")
+    message = models.TextField(verbose_name="نص التنبيه")
+
+    ALERT_TYPE_CHOICES = [
+        ('High Sugar', 'ارتفاع السكر'),
+        ('Low Sugar', 'انخفاض السكر'),
+        ('Missed Medication', 'جرعة دواء مفقودة'),
+        ('Appointment Reminder', 'تذكير موعد'),
+        ('General', 'عام'),
+        ('Doctor Note', 'ملاحظة طبيب جديدة')
+    ]
+    alert_type = models.CharField(max_length=50, choices=ALERT_TYPE_CHOICES, default='General', verbose_name="نوع التنبيه")
+
+    is_read = models.BooleanField(default=False, verbose_name="تمت القراءة")
+    timestamp = models.DateTimeField(auto_now_add=True, verbose_name="وقت التنبيه")
+
+    # ربط التنبيه بقراءة سكر معينة لو كان التنبيه بسببها (اختياري)
+    related_reading = models.ForeignKey(BloodGlucoseReading, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="قراءة السكر المرتبطة")
+
+    class Meta:
+        ordering = ['-timestamp'] # ترتيب التنبيهات من الأحدث للأقدم
+        verbose_name = "تنبيه / إشعار"
+        verbose_name_plural = "التنبيهات / الإشعارات"
+
+    def __str__(self):
+        return f"تنبيه لـ {self.patient.user.username} - {self.get_alert_type_display()} ({'مقروء' if self.is_read else 'غير مقروء'})"
+# --- نهاية Alert Model ---

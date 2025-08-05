@@ -1,7 +1,7 @@
 # core/serializers.py
 
 from rest_framework import serializers
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation
+from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert # تم إضافة Alert
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
@@ -70,7 +70,7 @@ class PatientProfileSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         for attr, value in validated_data.items():
-            if attr != 'user':
+            if attr not in ['user', 'profile_picture']:
                 setattr(instance, attr, value)
 
         instance.save()
@@ -111,24 +111,46 @@ class AttachmentSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(obj.file.url)
         return obj.file.url
 
-# --- NEW: Consultation Serializer ---
+# Serializer للاستشارات
 class ConsultationSerializer(serializers.ModelSerializer):
-    patient = serializers.PrimaryKeyRelatedField(queryset=PatientProfile.objects.all(), required=False) # يمكن أن يتم تعيينه تلقائياً في ViewSet
-    doctor = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False) # يمكن أن يتم تعيينه تلقائياً في ViewSet
+    patient = serializers.PrimaryKeyRelatedField(queryset=PatientProfile.objects.all(), required=False)
+    doctor = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False)
 
     class Meta:
         model = Consultation
         fields = '__all__'
-        read_only_fields = ['created_at'] # تاريخ الإنشاء يُضاف تلقائياً
+        read_only_fields = ['created_at']
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
-        # عرض تفاصيل المريض والطبيب بدلاً من الـ ID فقط
         if instance.patient:
             representation['patient'] = PatientProfileSerializer(instance.patient, context=self.context).data
         if instance.doctor:
             representation['doctor'] = UserSerializer(instance.doctor, context=self.context).data
         return representation
+
+# --- NEW: Alert Serializer ---
+class AlertSerializer(serializers.ModelSerializer):
+    # عرض تفاصيل المريض والراسل بدلاً من الـ ID فقط
+    patient = serializers.PrimaryKeyRelatedField(queryset=PatientProfile.objects.all(), required=False) # يُضبط تلقائياً من الـ ViewSet
+    sender_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True) # يُضبط تلقائياً من الـ ViewSet
+
+    class Meta:
+        model = Alert
+        fields = '__all__'
+        read_only_fields = ['timestamp'] # تاريخ الإنشاء يُضاف تلقائياً
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        if instance.patient:
+            representation['patient'] = PatientProfileSerializer(instance.patient, context=self.context).data
+        if instance.sender_user:
+            representation['sender_user'] = UserSerializer(instance.sender_user, context=self.context).data
+        if instance.related_reading:
+            representation['related_reading'] = BloodGlucoseReadingSerializer(instance.related_reading, context=self.context).data
+        return representation
+
+# --- نهاية Alert Serializer ---
 
 # --- Serializers خاصة بواجهات الطبيب ---
 
@@ -145,7 +167,8 @@ class DoctorPatientDetailSerializer(serializers.ModelSerializer):
     medications = MedicationSerializer(many=True, read_only=True)
     doctor_notes = DoctorNoteSerializer(many=True, read_only=True)
     attachments = AttachmentSerializer(many=True, read_only=True)
-    consultations = ConsultationSerializer(many=True, read_only=True) # <--- تم إضافة هذا السطر
+    consultations = ConsultationSerializer(many=True, read_only=True)
+    alerts = AlertSerializer(many=True, read_only=True) # تم إضافة هذا السطر
 
     class Meta:
         model = PatientProfile
