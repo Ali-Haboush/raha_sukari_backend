@@ -4,7 +4,7 @@ from django.contrib import admin
 from .models import (
     PatientProfile, BloodGlucoseReading, Medication, DoctorNote,
     Attachment, Consultation, Alert, DoctorProfile, FavoriteDoctor,
-    Appointment # <--- NEW
+    Appointment
 )
 
 # تسجيل PatientProfile في لوحة الإدارة
@@ -55,13 +55,14 @@ class ConsultationAdmin(admin.ModelAdmin):
     list_filter = ('consultation_date', 'doctor')
     raw_id_fields = ('patient', 'doctor')
 
-# تسجيل Alert في لوحة الإدارة
+# --- تسجيل Alert في لوحة الإدارة (هذا هو الجزء الذي تم تصحيحه) ---
 @admin.register(Alert)
 class AlertAdmin(admin.ModelAdmin):
-    list_display = ('patient', 'alert_type', 'message', 'is_read', 'timestamp', 'sender_user')
-    search_fields = ('patient__user__username', 'alert_type', 'message')
-    list_filter = ('alert_type', 'is_read', 'timestamp')
-    raw_id_fields = ('patient', 'sender_user', 'related_reading')
+    # استخدام الحقول الجديدة الموجودة الآن في المودل
+    list_display = ('name', 'patient', 'alert_type', 'alert_date', 'alert_time', 'is_active', 'created_at')
+    list_filter = ('is_active', 'alert_type', 'alert_date')
+    search_fields = ('name', 'patient__user__username')
+    raw_id_fields = ('patient',) # تم تصحيح هذا السطر أيضاً
 
 # تسجيل DoctorProfile في لوحة الإدارة
 @admin.register(DoctorProfile)
@@ -79,7 +80,7 @@ class FavoriteDoctorAdmin(admin.ModelAdmin):
     list_filter = ('patient__user__username',)
     raw_id_fields = ('patient', 'doctor')
 
-# --- NEW: تسجيل Appointment في لوحة الإدارة ---
+# تسجيل Appointment في لوحة الإدارة
 @admin.register(Appointment)
 class AppointmentAdmin(admin.ModelAdmin):
     list_display = ('patient', 'doctor', 'appointment_date', 'appointment_time', 'status')

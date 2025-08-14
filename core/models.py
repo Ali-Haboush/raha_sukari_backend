@@ -7,8 +7,7 @@ from django.dispatch import receiver
 import os
 from django.utils import timezone
 
-# ... (كل دوال المسارات والمودلز الأخرى تبقى كما هي) ...
-
+# --- دوال المسارات تبقى كما هي ---
 def patient_profile_picture_path(instance, filename):
     return f'profile_pics/patient_{instance.user.id}/{filename}'
 
@@ -18,6 +17,7 @@ def doctor_profile_picture_path(instance, filename):
 def attachment_file_path(instance, filename):
     return f'attachments/patient_{instance.patient.id}/{filename}'
 
+# --- كل المودلز الأخرى تبقى كما هي ---
 class DoctorProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='doctorprofile')
     specialty = models.CharField(max_length=255, verbose_name="التخصص")
@@ -64,24 +64,19 @@ def create_or_update_doctor_profile(sender, instance, created, **kwargs):
     if instance.is_staff and not hasattr(instance, 'doctorprofile'):
         DoctorProfile.objects.create(user=instance)
 
-# --- BloodGlucoseReading Model (WITH NEW FIELD) ---
 class BloodGlucoseReading(models.Model):
     READING_TYPE_CHOICES = [
         ('Fasting', 'صائم'),
         ('After Meal', 'بعد الأكل'),
         ('Random', 'عشوائي'),
     ]
-    
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='glucose_readings')
     reading_value = models.FloatField()
     reading_timestamp = models.DateTimeField(default=timezone.now)
     notes = models.TextField(blank=True, null=True)
-    # --- الحقل الجديد ---
     reading_type = models.CharField(max_length=20, choices=READING_TYPE_CHOICES, default='Random', verbose_name="نوع القراءة")
-
     def __str__(self):
         return f"Glucose Reading for {self.patient.user.username}: {self.reading_value} at {self.reading_timestamp}"
-
 
 class Medication(models.Model):
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='medications')
@@ -129,26 +124,36 @@ class Consultation(models.Model):
     def __str__(self):
         return f"Consultation for {self.patient.user.username} by Dr. {self.doctor.first_name if self.doctor else 'N/A'} on {self.consultation_date}"
 
+# --- Alert (Notification) Model - UPDATED ---
 class Alert(models.Model):
-    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='alerts', verbose_name="المريض")
-    sender_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="المرسل")
-    message = models.TextField(verbose_name="نص التنبيه")
     ALERT_TYPE_CHOICES = [
-        ('High Sugar', 'ارتفاع السكر'),
-        ('Low Sugar', 'انخفاض السكر'),
-        ('Missed Medication', 'جرعة دواء مفقودة'),
-        ('Appointment Reminder', 'تذكير موعد'),
-        ('General', 'عام'),
-        ('Doctor Note', 'ملاحظة طبيب جديدة')
+        ('Medication', 'تذكير دواء'),
+        ('Measurement', 'تذكير قياس'),
+        ('General', 'تذكير عام'),
     ]
-    alert_type = models.CharField(max_length=50, choices=ALERT_TYPE_CHOICES, default='General', verbose_name="نوع التنبيه")
-    is_read = models.BooleanField(default=False, verbose_name="تمت القراءة")
-    timestamp = models.DateTimeField(auto_now_add=True, verbose_name="وقت التنبيه")
-    related_reading = models.ForeignKey(BloodGlucoseReading, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="قراءة السكر المرتبطة")
+    RECURRENCE_CHOICES = [
+        ('Once', 'مرة واحدة'),
+        ('Daily', 'يومياً'),
+        ('Weekly', 'أسبوعياً'),
+    ]
+    
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='alerts', verbose_name="المريض")
+    name = models.CharField(max_length=100, verbose_name="اسم التنبيه")
+    alert_type = models.CharField(max_length=20, choices=ALERT_TYPE_CHOICES, default='General', verbose_name="نوع التنبيه")
+    alert_date = models.DateField(verbose_name="تاريخ التنبيه")
+    alert_time = models.TimeField(verbose_name="وقت التنبيه")
+    recurrence = models.CharField(max_length=10, choices=RECURRENCE_CHOICES, default='Once', verbose_name="التكرار")
+    is_active = models.BooleanField(default=True, verbose_name="مفعل")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="وقت الإنشاء")
+    
     class Meta:
-        ordering = ['-timestamp']
-        verbose_name = "تنبيه / إشعار"
-        verbose_name_plural = "التنبيهات / الإشعارات"
+        ordering = ['alert_date', 'alert_time']
+        verbose_name = "تنبيه"
+        verbose_name_plural = "التنبيهات"
+
+    def __str__(self):
+        return f"Alert '{self.name}' for {self.patient.user.username} at {self.alert_time}"
+
 
 class Appointment(models.Model):
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='appointments')
