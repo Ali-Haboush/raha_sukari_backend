@@ -1,11 +1,61 @@
 # core/serializers.py
 
 from rest_framework import serializers
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert, DoctorProfile, FavoriteDoctor
 from django.contrib.auth.models import User
+from rest_framework.authtoken.models import Token
+from .models import (
+    PatientProfile, BloodGlucoseReading, Medication, DoctorNote,
+    Attachment, Consultation, Alert, DoctorProfile, FavoriteDoctor,
+    Appointment
+)
 from django.contrib.auth import authenticate
 
-# Serializer لنموذج المستخدم الأساسي في Django
+# --- AuthToken Serializer ---
+class AuthTokenSerializer(serializers.Serializer):
+    username = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        help_text="Username or email address."
+    )
+    email = serializers.EmailField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        help_text="Email address."
+    )
+    password = serializers.CharField(
+        style={'input_type': 'password'},
+        trim_whitespace=False,
+        write_only=True
+    )
+    token = serializers.CharField(read_only=True)
+
+    def validate(self, attrs):
+        username = attrs.get('username')
+        email = attrs.get('email')
+        password = attrs.get('password')
+
+        if not username and not email:
+            raise serializers.ValidationError('يجب إدخال اسم المستخدم أو البريد الإلكتروني.')
+
+        user = None
+        if username:
+            user = User.objects.filter(
+                username__iexact=username
+            ).first()
+        elif email:
+            user = User.objects.filter(
+                email__iexact=email
+            ).first()
+
+        if user and user.check_password(password):
+            attrs['user'] = user
+            return attrs
+
+        raise serializers.ValidationError('اسم المستخدم / البريد الإلكتروني أو كلمة المرور غير صحيحة.', code='authorization')
+
+# --- User Serializer ---
 class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(write_only=True, required=True)
 
@@ -53,57 +103,69 @@ class UserSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
-# Serializer لملف تعريف المريض
+# --- PatientProfile Serializer ---
 class PatientProfileSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-
-    address = serializers.CharField(required=False, allow_blank=True)
-    gender = serializers.CharField(required=False, allow_blank=True)
-    date_of_birth = serializers.DateField(required=False, allow_null=True)
-    phone_number = serializers.CharField(required=False, allow_blank=True)
-    profile_picture = serializers.ImageField(required=False, allow_null=True)
-    medical_notes = serializers.CharField(required=False, allow_blank=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+    email = serializers.EmailField(source='user.email', read_only=True)
+    first_name = serializers.CharField(source='user.first_name', required=False)
+    last_name = serializers.CharField(source='user.last_name', required=False)
 
     class Meta:
         model = PatientProfile
-        fields = '__all__'
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name', 'address',
+            'gender', 'date_of_birth', 'phone_number', 'diabetes_type',
+            'diagnosis_date', 'medical_notes', 'profile_picture'
+        ]
+        read_only_fields = ['id', 'username', 'email']
 
     def update(self, instance, validated_data):
-        for attr, value in validated_data.items():
-            if attr not in ['user', 'profile_picture']:
-                setattr(instance, attr, value)
+        user_data = validated_data.pop('user', {})
+        user_instance = instance.user
 
-        instance.save()
-        return instance
+        for attr, value in user_data.items():
+            setattr(user_instance, attr, value)
+        user_instance.save()
 
-# Serializer لقراءة السكر
+        return super().update(instance, validated_data)
+
+# --- BloodGlucoseReading Serializer ---
 class BloodGlucoseReadingSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
+
     class Meta:
         model = BloodGlucoseReading
-        fields = '__all__'
+        fields = ['id', 'patient', 'patient_name', 'reading_value', 'reading_timestamp', 'notes']
+        read_only_fields = ['id', 'patient', 'reading_timestamp', 'patient_name']
 
-# Serializer للدواء
+# --- Medication Serializer ---
 class MedicationSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
+
     class Meta:
         model = Medication
-        fields = '__all__'
+        fields = ['id', 'patient', 'patient_name', 'name', 'dosage', 'frequency', 'start_date', 'end_date', 'notes']
+        read_only_fields = ['id', 'patient', 'patient_name']
 
-# Serializer لملاحظات الطبيب
+# --- DoctorNote Serializer ---
 class DoctorNoteSerializer(serializers.ModelSerializer):
-    doctor = UserSerializer(read_only=True)
+    doctor_name = serializers.CharField(source='doctor.first_name', read_only=True)
+    patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
 
     class Meta:
         model = DoctorNote
-        fields = ['id', 'patient', 'doctor', 'note_text', 'timestamp']
+        fields = ['id', 'patient', 'patient_name', 'doctor', 'doctor_name', 'note_text', 'timestamp']
+        read_only_fields = ['id', 'doctor', 'timestamp', 'patient_name', 'doctor_name']
 
-# Serializer للمرفقات
+# --- Attachment Serializer ---
 class AttachmentSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
     file_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Attachment
-        fields = '__all__'
-        read_only_fields = ['patient', 'uploaded_at']
+        fields = ['id', 'patient', 'patient_name', 'file', 'description', 'uploaded_at', 'file_url']
+        read_only_fields = ['id', 'patient', 'patient_name', 'uploaded_at', 'file_url']
 
     def get_file_url(self, obj):
         request = self.context.get('request')
@@ -111,15 +173,19 @@ class AttachmentSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(obj.file.url)
         return obj.file.url
 
-# Serializer للاستشارات
+# --- Consultation Serializer ---
 class ConsultationSerializer(serializers.ModelSerializer):
-    patient = serializers.PrimaryKeyRelatedField(queryset=PatientProfile.objects.all(), required=False)
-    doctor = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False)
+    doctor_name = serializers.CharField(source='doctor.first_name', read_only=True)
+    patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
+    patient_id = serializers.IntegerField(source='patient.id', read_only=True)
 
     class Meta:
         model = Consultation
-        fields = '__all__'
-        read_only_fields = ['created_at']
+        fields = [
+            'id', 'patient', 'patient_id', 'patient_name', 'doctor', 'doctor_name',
+            'consultation_date', 'consultation_time', 'diagnosis', 'treatment', 'notes', 'created_at'
+        ]
+        read_only_fields = ['id', 'doctor', 'created_at', 'patient_id', 'patient_name', 'doctor_name']
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
@@ -129,15 +195,18 @@ class ConsultationSerializer(serializers.ModelSerializer):
             representation['doctor'] = UserSerializer(instance.doctor, context=self.context).data
         return representation
 
-# Serializer للتنبيهات
+# --- Alert Serializer ---
 class AlertSerializer(serializers.ModelSerializer):
-    patient = serializers.PrimaryKeyRelatedField(queryset=PatientProfile.objects.all(), required=False)
-    sender_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
+    patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
+    sender_name = serializers.CharField(source='sender_user.first_name', read_only=True)
 
     class Meta:
         model = Alert
-        fields = '__all__'
-        read_only_fields = ['timestamp']
+        fields = [
+            'id', 'patient', 'patient_name', 'sender_user', 'sender_name', 'message',
+            'alert_type', 'is_read', 'timestamp', 'related_reading'
+        ]
+        read_only_fields = ['id', 'patient', 'sender_user', 'timestamp', 'patient_name', 'sender_name']
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
@@ -149,90 +218,61 @@ class AlertSerializer(serializers.ModelSerializer):
             representation['related_reading'] = BloodGlucoseReadingSerializer(instance.related_reading, context=self.context).data
         return representation
 
-# --- NEW: DoctorProfile Serializer ---
-class DoctorProfileSerializer(serializers.ModelSerializer):
+# --- DoctorProfile Serializer (List View) ---
+class DoctorProfileListSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
-    # لإظهار المتابعين
-    favorited_by_patients_count = serializers.SerializerMethodField()
 
     class Meta:
         model = DoctorProfile
-        fields = '__all__'
-        read_only_fields = ['average_rating']
+        fields = [
+            'id', 'user', 'specialty', 'address', 'phone_number',
+            'is_available', 'average_rating'
+        ]
+        read_only_fields = ['id', 'user', 'specialty', 'address', 'phone_number', 'is_available', 'average_rating']
 
-    def get_favorited_by_patients_count(self, obj):
-        return obj.favorited_by_patients.count()
+# --- DoctorProfile Serializer (Detail View) ---
+class DoctorProfileDetailSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    is_favorited = serializers.SerializerMethodField()
 
-# --- NEW: FavoriteDoctor Serializer ---
+    class Meta:
+        model = DoctorProfile
+        fields = [
+            'id', 'user', 'specialty', 'address', 'phone_number',
+            'bio', 'working_hours', 'is_available', 'average_rating', 'is_favorited'
+        ]
+        read_only_fields = ['id', 'user', 'is_available', 'average_rating', 'is_favorited']
+
+    def get_is_favorited(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated and hasattr(request.user, 'patientprofile'):
+            return FavoriteDoctor.objects.filter(patient=request.user.patientprofile, doctor=obj).exists()
+        return False
+
+# --- Appointment Serializer (The CORRECTED and SIMPLIFIED version) ---
+class AppointmentSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source='patient.user.get_full_name', read_only=True)
+    doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
+    
+    class Meta:
+        model = Appointment
+        fields = [
+            'id', 
+            'patient',
+            'patient_name', 
+            'doctor',
+            'doctor_name', 
+            'appointment_date', 
+            'appointment_time', 
+            'status', 
+            'notes'
+        ]
+        read_only_fields = ['patient', 'status']
+
+# --- FavoriteDoctor Serializer ---
 class FavoriteDoctorSerializer(serializers.ModelSerializer):
+    doctor = DoctorProfileDetailSerializer(read_only=True)
+
     class Meta:
         model = FavoriteDoctor
-        fields = '__all__'
-
-# --- Serializers خاصة بواجهات الطبيب ---
-class DoctorPatientListSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-
-    class Meta:
-        model = PatientProfile
-        fields = ['id', 'user', 'diabetes_type', 'diagnosis_date']
-
-class DoctorPatientDetailSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-    glucose_readings = BloodGlucoseReadingSerializer(many=True, read_only=True)
-    medications = MedicationSerializer(many=True, read_only=True)
-    doctor_notes = DoctorNoteSerializer(many=True, read_only=True)
-    attachments = AttachmentSerializer(many=True, read_only=True)
-    consultations = ConsultationSerializer(many=True, read_only=True)
-    alerts = AlertSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = PatientProfile
-        fields = '__all__'
-
-# --- Serializer لتسجيل الدخول بالبريد الإلكتروني أو اسم المستخدم ---
-class AuthTokenSerializer(serializers.Serializer):
-    username = serializers.CharField(write_only=True, required=False)
-    email = serializers.EmailField(write_only=True, required=False)
-    password = serializers.CharField(
-        style={'input_type': 'password'},
-        trim_whitespace=False,
-        write_only=True
-    )
-    token = serializers.CharField(read_only=True)
-
-    def validate(self, attrs):
-        username = attrs.get('username')
-        email = attrs.get('email')
-        password = attrs.get('password')
-
-        if not (username or email):
-            raise serializers.ValidationError(
-                'يجب تزويد اسم المستخدم أو البريد الإلكتروني.',
-                code='authorization'
-            )
-        if not password:
-             raise serializers.ValidationError(
-                'يجب تزويد كلمة السر.',
-                code='authorization'
-            )
-
-        user = None
-        if email:
-            try:
-                user = User.objects.get(email=email)
-                user = authenticate(request=self.context.get('request'), username=user.username, password=password)
-            except User.DoesNotExist:
-                pass
-
-        if user is None and username:
-            user = authenticate(request=self.context.get('request'), username=username, password=password)
-
-        if not user:
-            raise serializers.ValidationError(
-                'غير قادر على تسجيل الدخول ببيانات الدخول المزودة.',
-                code='authorization'
-            )
-
-        attrs['user'] = user
-        return attrs
+        fields = ['id', 'doctor']

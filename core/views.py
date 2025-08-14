@@ -18,13 +18,16 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication
 
 
-from .models import PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment, Consultation, Alert, User, DoctorProfile, FavoriteDoctor
+from .models import (
+    PatientProfile, BloodGlucoseReading, Medication, DoctorNote, Attachment,
+    Consultation, Alert, User, DoctorProfile, FavoriteDoctor, Appointment
+)
 from .serializers import (
     UserSerializer, PatientProfileSerializer, BloodGlucoseReadingSerializer,
     MedicationSerializer, DoctorNoteSerializer, AttachmentSerializer,
-    AuthTokenSerializer, DoctorPatientListSerializer, DoctorPatientDetailSerializer,
+    AuthTokenSerializer, DoctorProfileListSerializer, DoctorProfileDetailSerializer,
     ConsultationSerializer, AlertSerializer,
-    DoctorProfileSerializer, FavoriteDoctorSerializer
+    FavoriteDoctorSerializer, AppointmentSerializer
 )
 from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor
 
@@ -120,7 +123,7 @@ class MedicationViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.is_authenticated:
             if hasattr(user, 'patientprofile'):
-                return Medication.objects.filter(patient=user.patientprofile).order_by('-start_date')
+                return Medication.objects.filter(patient=user.user.patientprofile).order_by('-start_date')
             elif user.is_staff:
                 return Medication.objects.all().order_by('-start_date')
         return Medication.objects.none()
@@ -131,7 +134,7 @@ class MedicationViewSet(viewsets.ModelViewSet):
         else:
             raise serializers.ValidationError("Only patients can add medications.")
 
-# --- DoctorNote ViewSet ---
+    # --- DoctorNote ViewSet ---
 class DoctorNoteViewSet(viewsets.ModelViewSet):
     queryset = DoctorNote.objects.all()
     serializer_class = DoctorNoteSerializer
@@ -152,7 +155,40 @@ class DoctorNoteViewSet(viewsets.ModelViewSet):
         else:
             raise serializers.ValidationError("Only doctors can create doctor notes.")
 
-# --- Attachment ViewSet ---
+# --- PDF Report View ---
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsDoctor | IsPatientOwnerOrDoctor])
+def generate_pdf_report(request, consultation_id):
+    consultation = get_object_or_404(Consultation, id=consultation_id)
+
+    user = request.user
+    if not user.is_authenticated:
+        return HttpResponse("غير مصرح لك بالدخول. يرجى تسجيل الدخول.", status=status.HTTP_401_UNAUTHORIZED)
+
+    if hasattr(user, 'patientprofile') and user.patientprofile != consultation.patient:
+        return HttpResponse("غير مصرح لك بالوصول لهذا التقرير.", status=status.HTTP_403_FORBIDDEN)
+
+    if user.is_staff and user != consultation.doctor:
+        pass 
+
+    context = {
+        'consultation': consultation,
+        'patient': consultation.patient,
+        'doctor': consultation.doctor,
+        'now': timezone.now(),
+    }
+
+    html_string = render_to_string('core/consultation_report.html', context)
+    html = HTML(string=html_string)
+
+    pdf_file = html.write_pdf()
+
+    response = HttpResponse(pdf_file, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="consultation_report_{consultation.id}.pdf"'
+    return response
+
+    # --- Attachment ViewSet ---
 class AttachmentViewSet(viewsets.ModelViewSet):
     queryset = Attachment.objects.all()
     serializer_class = AttachmentSerializer
@@ -173,7 +209,7 @@ class AttachmentViewSet(viewsets.ModelViewSet):
         else:
             raise serializers.ValidationError("Only patients can upload attachments.")
 
-# --- Consultation ViewSet ---
+    # --- Consultation ViewSet ---
 class ConsultationViewSet(viewsets.ModelViewSet):
     queryset = Consultation.objects.all()
     serializer_class = ConsultationSerializer
@@ -247,11 +283,22 @@ class AlertViewSet(viewsets.ModelViewSet):
 # --- DoctorProfile ViewSet ---
 class DoctorViewSet(viewsets.ModelViewSet):
     queryset = DoctorProfile.objects.all()
-    serializer_class = DoctorProfileSerializer
+    serializer_class = DoctorProfileDetailSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return DoctorProfileListSerializer
+        elif self.action in ['favorite', 'unfavorite']:
+            return FavoriteDoctorSerializer
+        return DoctorProfileDetailSerializer
+
     def get_queryset(self):
-        return DoctorProfile.objects.filter(user__is_staff=True).order_by('user__first_name')
+        if hasattr(self.request.user, 'patientprofile'):
+            return DoctorProfile.objects.filter(user__is_staff=True, is_available=True).order_by('user__first_name')
+        elif self.request.user.is_staff:
+            return DoctorProfile.objects.filter(user__is_staff=True).order_by('user__first_name')
+        return DoctorProfile.objects.none()
 
     @action(detail=True, methods=['post'], permission_classes=[IsPatientOwner])
     def favorite(self, request, pk=None):
@@ -275,63 +322,36 @@ class DoctorViewSet(viewsets.ModelViewSet):
 
         return Response({'status': 'تم حذف الطبيب من المفضلة'}, status=status.HTTP_204_NO_CONTENT)
 
+    @action(detail=False, methods=['get'], url_path='favorites', permission_classes=[IsPatientOwner])
+    def list_favorites(self, request):
+        patient_profile = request.user.patientprofile
+        favorites = FavoriteDoctor.objects.filter(patient=patient_profile)
+        serializer = FavoriteDoctorSerializer(favorites, many=True, context={'request': request})
+        return Response(serializer.data)
 
-# --- PDF Report View ---
-@api_view(['GET'])
-@authentication_classes([TokenAuthentication, SessionAuthentication])
-@permission_classes([IsDoctor | IsPatientOwnerOrDoctor])
-def generate_pdf_report(request, consultation_id):
-    consultation = get_object_or_404(Consultation, id=consultation_id)
+# --- NEW: Appointment ViewSet ---
+class AppointmentViewSet(viewsets.ModelViewSet):
+    queryset = Appointment.objects.all()
+    serializer_class = AppointmentSerializer
+    permission_classes = [IsAuthenticated]
 
-    user = request.user
-    if not user.is_authenticated:
-        return HttpResponse("غير مصرح لك بالدخول. يرجى تسجيل الدخول.", status=status.HTTP_401_UNAUTHORIZED)
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            if hasattr(user, 'patientprofile'):
+                return Appointment.objects.filter(patient=user.patientprofile).order_by('-appointment_date', '-appointment_time')
+            elif user.is_staff:
+                return Appointment.objects.filter(doctor=user.doctorprofile).order_by('-appointment_date', '-appointment_time')
+        return Appointment.objects.none()
 
-    if hasattr(user, 'patientprofile') and user.patientprofile != consultation.patient:
-        return HttpResponse("غير مصرح لك بالوصول لهذا التقرير.", status=status.HTTP_403_FORBIDDEN)
+    def perform_create(self, serializer):
+        if hasattr(self.request.user, 'patientprofile'):
+            serializer.save(patient=self.request.user.patientprofile)
+        else:
+            raise serializers.ValidationError("Only patients can request appointments.")
 
-    if user.is_staff and user != consultation.doctor:
-        pass 
-
-    context = {
-        'consultation': consultation,
-        'patient': consultation.patient,
-        'doctor': consultation.doctor,
-        'now': timezone.now(),
-    }
-
-    html_string = render_to_string('core/consultation_report.html', context)
-    html = HTML(string=html_string)
-
-    pdf_file = html.write_pdf()
-
-    response = HttpResponse(pdf_file, content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="consultation_report_{consultation.id}.pdf"'
-    return response
-
-# View لتسجيل الدخول بالبريد الإلكتروني أو اسم المستخدم
-class CustomAuthToken(ObtainAuthToken):
-    serializer_class = AuthTokenSerializer
-
-    def post(self, request, *args, **kwargs):
-        serializer = self.serializer_class(data=request.data,
-                                           context={'request': request})
-        serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data['user']
-        token, created = Token.objects.get_or_create(user=user)
-
-        user_type = None
-        if hasattr(user, 'patientprofile'):
-            user_type = 'patient'
-        elif user.is_staff:
-            user_type = 'doctor'
-
-        return Response({
-            'token': token.key,
-            'user_id': user.pk,
-            'username': user.username,
-            'email': user.email,
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'user_type': user_type
-        })
+    def perform_update(self, serializer):
+        if self.request.user.is_staff:
+            serializer.save()
+        else:
+            raise serializers.ValidationError("Only doctors can update appointments.")

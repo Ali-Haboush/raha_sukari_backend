@@ -19,21 +19,21 @@ def doctor_profile_picture_path(instance, filename):
 def attachment_file_path(instance, filename):
     return f'attachments/patient_{instance.patient.id}/{filename}'
 
-# --- NEW: DoctorProfile Model ---
+# --- DoctorProfile Model ---
 class DoctorProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='doctorprofile')
     specialty = models.CharField(max_length=255, verbose_name="التخصص")
     address = models.CharField(max_length=255, verbose_name="العنوان")
     phone_number = models.CharField(max_length=20, verbose_name="رقم الهاتف")
     bio = models.TextField(blank=True, null=True, verbose_name="نبذة عن الطبيب")
-    profile_picture = models.ImageField(upload_to=doctor_profile_picture_path, blank=True, null=True, verbose_name="صورة الطبيب")
+    working_hours = models.TextField(blank=True, null=True, verbose_name="ساعات العمل")
     average_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00, verbose_name="متوسط التقييم")
     is_available = models.BooleanField(default=True, verbose_name="متاح الآن")
 
     def __str__(self):
         return f"Dr. {self.user.first_name} {self.user.last_name} - {self.specialty}"
 
-# --- NEW: FavoriteDoctor Model ---
+# --- FavoriteDoctor Model ---
 class FavoriteDoctor(models.Model):
     patient = models.ForeignKey('PatientProfile', on_delete=models.CASCADE, related_name='favorite_doctors')
     doctor = models.ForeignKey('DoctorProfile', on_delete=models.CASCADE, related_name='favorited_by_patients')
@@ -165,5 +165,28 @@ class Alert(models.Model):
     class Meta:
         ordering = ['-timestamp']
         verbose_name = "تنبيه / إشعار"
-       
         verbose_name_plural = "التنبيهات / الإشعارات"
+
+
+# --- NEW: Appointment Model ---
+class Appointment(models.Model):
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='appointments')
+    doctor = models.ForeignKey(DoctorProfile, on_delete=models.CASCADE, related_name='appointments')
+    appointment_date = models.DateField()
+    appointment_time = models.TimeField()
+    STATUS_CHOICES = [
+        ('Pending', 'بانتظار التأكيد'),
+        ('Confirmed', 'مؤكد'),
+        ('Cancelled', 'ملغى'),
+        ('Completed', 'مكتمل'),
+    ]
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='Pending')
+    notes = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['-appointment_date', '-appointment_time']
+        verbose_name = "موعد"
+        verbose_name_plural = "المواعيد"
+
+    def __str__(self):
+        return f"Appointment for {self.patient.user.username} with Dr. {self.doctor.user.username} on {self.appointment_date}"
