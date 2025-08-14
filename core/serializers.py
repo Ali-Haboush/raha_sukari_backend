@@ -10,7 +10,7 @@ from .models import (
 )
 from django.contrib.auth import authenticate
 
-# --- AuthToken Serializer ---
+
 class AuthTokenSerializer(serializers.Serializer):
     username = serializers.CharField(
         write_only=True,
@@ -30,15 +30,12 @@ class AuthTokenSerializer(serializers.Serializer):
         write_only=True
     )
     token = serializers.CharField(read_only=True)
-
     def validate(self, attrs):
         username = attrs.get('username')
         email = attrs.get('email')
         password = attrs.get('password')
-
         if not username and not email:
             raise serializers.ValidationError('يجب إدخال اسم المستخدم أو البريد الإلكتروني.')
-
         user = None
         if username:
             user = User.objects.filter(
@@ -48,17 +45,13 @@ class AuthTokenSerializer(serializers.Serializer):
             user = User.objects.filter(
                 email__iexact=email
             ).first()
-
         if user and user.check_password(password):
             attrs['user'] = user
             return attrs
-
         raise serializers.ValidationError('اسم المستخدم / البريد الإلكتروني أو كلمة المرور غير صحيحة.', code='authorization')
 
-# --- User Serializer ---
 class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(write_only=True, required=True)
-
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 'password', 'full_name']
@@ -68,48 +61,39 @@ class UserSerializer(serializers.ModelSerializer):
             'first_name': {'read_only': True},
             'last_name': {'read_only': True},
         }
-
     def create(self, validated_data):
         full_name = validated_data.pop('full_name')
         name_parts = full_name.split(' ', 1)
         first_name = name_parts[0]
         last_name = name_parts[1] if len(name_parts) > 1 else ''
-
         if 'username' not in validated_data or not validated_data['username']:
             validated_data['username'] = validated_data['email']
-
         user = User.objects.create_user(
             first_name=first_name,
             last_name=last_name,
             **validated_data
         )
         return user
-
     def update(self, instance, validated_data):
         if 'full_name' in validated_data:
             full_name = validated_data.pop('full_name')
             name_parts = full_name.split(' ', 1)
             instance.first_name = name_parts[0]
             instance.last_name = name_parts[1] if len(name_parts) > 1 else ''
-
         if 'email' in validated_data:
             instance.email = validated_data.get('email', instance.email)
             if instance.username == instance.email:
                 instance.username = instance.email
-
         if 'password' in validated_data:
             instance.set_password(validated_data['password'])
-
         instance.save()
         return instance
 
-# --- PatientProfile Serializer ---
 class PatientProfileSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     email = serializers.EmailField(source='user.email', read_only=True)
     first_name = serializers.CharField(source='user.first_name', required=False)
     last_name = serializers.CharField(source='user.last_name', required=False)
-
     class Meta:
         model = PatientProfile
         fields = [
@@ -118,67 +102,57 @@ class PatientProfileSerializer(serializers.ModelSerializer):
             'diagnosis_date', 'medical_notes', 'profile_picture'
         ]
         read_only_fields = ['id', 'username', 'email']
-
     def update(self, instance, validated_data):
         user_data = validated_data.pop('user', {})
         user_instance = instance.user
-
         for attr, value in user_data.items():
             setattr(user_instance, attr, value)
         user_instance.save()
-
         return super().update(instance, validated_data)
 
-# --- BloodGlucoseReading Serializer ---
+# --- BloodGlucoseReading Serializer (WITH NEW FIELD) ---
 class BloodGlucoseReadingSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
 
     class Meta:
         model = BloodGlucoseReading
-        fields = ['id', 'patient', 'patient_name', 'reading_value', 'reading_timestamp', 'notes']
+        # أضفنا الحقل الجديد هنا
+        fields = ['id', 'patient', 'patient_name', 'reading_value', 'reading_timestamp', 'reading_type', 'notes']
         read_only_fields = ['id', 'patient', 'reading_timestamp', 'patient_name']
 
-# --- Medication Serializer ---
+
 class MedicationSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
-
     class Meta:
         model = Medication
         fields = ['id', 'patient', 'patient_name', 'name', 'dosage', 'frequency', 'start_date', 'end_date', 'notes']
         read_only_fields = ['id', 'patient', 'patient_name']
 
-# --- DoctorNote Serializer ---
 class DoctorNoteSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.first_name', read_only=True)
     patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
-
     class Meta:
         model = DoctorNote
         fields = ['id', 'patient', 'patient_name', 'doctor', 'doctor_name', 'note_text', 'timestamp']
         read_only_fields = ['id', 'doctor', 'timestamp', 'patient_name', 'doctor_name']
 
-# --- Attachment Serializer ---
 class AttachmentSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
     file_url = serializers.SerializerMethodField()
-
     class Meta:
         model = Attachment
         fields = ['id', 'patient', 'patient_name', 'file', 'description', 'uploaded_at', 'file_url']
         read_only_fields = ['id', 'patient', 'patient_name', 'uploaded_at', 'file_url']
-
     def get_file_url(self, obj):
         request = self.context.get('request')
         if request is not None:
             return request.build_absolute_uri(obj.file.url)
         return obj.file.url
 
-# --- Consultation Serializer ---
 class ConsultationSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.first_name', read_only=True)
     patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
     patient_id = serializers.IntegerField(source='patient.id', read_only=True)
-
     class Meta:
         model = Consultation
         fields = [
@@ -186,7 +160,6 @@ class ConsultationSerializer(serializers.ModelSerializer):
             'consultation_date', 'consultation_time', 'diagnosis', 'treatment', 'notes', 'created_at'
         ]
         read_only_fields = ['id', 'doctor', 'created_at', 'patient_id', 'patient_name', 'doctor_name']
-
     def to_representation(self, instance):
         representation = super().to_representation(instance)
         if instance.patient:
@@ -195,11 +168,9 @@ class ConsultationSerializer(serializers.ModelSerializer):
             representation['doctor'] = UserSerializer(instance.doctor, context=self.context).data
         return representation
 
-# --- Alert Serializer ---
 class AlertSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
     sender_name = serializers.CharField(source='sender_user.first_name', read_only=True)
-
     class Meta:
         model = Alert
         fields = [
@@ -207,7 +178,6 @@ class AlertSerializer(serializers.ModelSerializer):
             'alert_type', 'is_read', 'timestamp', 'related_reading'
         ]
         read_only_fields = ['id', 'patient', 'sender_user', 'timestamp', 'patient_name', 'sender_name']
-
     def to_representation(self, instance):
         representation = super().to_representation(instance)
         if instance.patient:
@@ -218,10 +188,8 @@ class AlertSerializer(serializers.ModelSerializer):
             representation['related_reading'] = BloodGlucoseReadingSerializer(instance.related_reading, context=self.context).data
         return representation
 
-# --- DoctorProfile Serializer (List View) ---
 class DoctorProfileListSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
-
     class Meta:
         model = DoctorProfile
         fields = [
@@ -230,11 +198,9 @@ class DoctorProfileListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'user', 'specialty', 'address', 'phone_number', 'is_available', 'average_rating']
 
-# --- DoctorProfile Serializer (Detail View) ---
 class DoctorProfileDetailSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     is_favorited = serializers.SerializerMethodField()
-
     class Meta:
         model = DoctorProfile
         fields = [
@@ -242,18 +208,15 @@ class DoctorProfileDetailSerializer(serializers.ModelSerializer):
             'bio', 'working_hours', 'is_available', 'average_rating', 'is_favorited'
         ]
         read_only_fields = ['id', 'user', 'is_available', 'average_rating', 'is_favorited']
-
     def get_is_favorited(self, obj):
         request = self.context.get('request')
         if request and request.user.is_authenticated and hasattr(request.user, 'patientprofile'):
             return FavoriteDoctor.objects.filter(patient=request.user.patientprofile, doctor=obj).exists()
         return False
 
-# --- Appointment Serializer (The CORRECTED and SIMPLIFIED version) ---
 class AppointmentSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.user.get_full_name', read_only=True)
     doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
-    
     class Meta:
         model = Appointment
         fields = [
@@ -269,10 +232,8 @@ class AppointmentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['patient', 'status']
 
-# --- FavoriteDoctor Serializer ---
 class FavoriteDoctorSerializer(serializers.ModelSerializer):
     doctor = DoctorProfileDetailSerializer(read_only=True)
-
     class Meta:
         model = FavoriteDoctor
         fields = ['id', 'doctor']
