@@ -2,6 +2,8 @@
 
 from django.db import models
 from django.contrib.auth.models import User
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 import os
@@ -124,7 +126,6 @@ class Consultation(models.Model):
     def __str__(self):
         return f"Consultation for {self.patient.user.username} by Dr. {self.doctor.first_name if self.doctor else 'N/A'} on {self.consultation_date}"
 
-# --- Alert (Notification) Model - UPDATED ---
 class Alert(models.Model):
     ALERT_TYPE_CHOICES = [
         ('Medication', 'تذكير دواء'),
@@ -154,7 +155,6 @@ class Alert(models.Model):
     def __str__(self):
         return f"Alert '{self.name}' for {self.patient.user.username} at {self.alert_time}"
 
-
 class Appointment(models.Model):
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name='appointments')
     doctor = models.ForeignKey(DoctorProfile, on_delete=models.CASCADE, related_name='appointments')
@@ -174,3 +174,23 @@ class Appointment(models.Model):
         verbose_name_plural = "المواعيد"
     def __str__(self):
         return f"Appointment for {self.patient.user.username} with Dr. {self.doctor.user.username} on {self.appointment_date}"
+
+# --- NEW: Notification Model ---
+class Notification(models.Model):
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', verbose_name="المستلم")
+    message = models.TextField(verbose_name="نص الإشعار")
+    is_read = models.BooleanField(default=False, verbose_name="تمت القراءة")
+    timestamp = models.DateTimeField(auto_now_add=True, verbose_name="وقت الإشعار")
+    
+    # حقول اختيارية للربط مع العنصر الذي سبب الإشعار (مثل موعد جديد)
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
+    object_id = models.PositiveIntegerField(null=True, blank=True)
+    related_object = GenericForeignKey('content_type', 'object_id')
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = "إشعار"
+        verbose_name_plural = "الإشعارات"
+
+    def __str__(self):
+        return f"Notification for {self.recipient.username}: {self.message[:30]}"
