@@ -6,7 +6,7 @@ from rest_framework.authtoken.models import Token
 from .models import (
     PatientProfile, BloodGlucoseReading, Medication, DoctorNote,
     Attachment, Consultation, Alert, DoctorProfile, FavoriteDoctor,
-    Appointment, Notification # <-- استيراد المودل الجديد
+    Appointment, Notification
 )
 from django.contrib.auth import authenticate
 
@@ -21,7 +21,6 @@ class AuthTokenSerializer(serializers.Serializer):
         write_only=True
     )
     token = serializers.CharField(read_only=True)
-
     def validate(self, attrs):
         username_or_email = attrs.get('username_or_email')
         password = attrs.get('password')
@@ -36,27 +35,18 @@ class AuthTokenSerializer(serializers.Serializer):
         raise serializers.ValidationError('اسم المستخدم / البريد الإلكتروني أو كلمة المرور غير صحيحة.', code='authorization')
 
 class UserSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(write_only=True, required=True)
     role = serializers.ChoiceField(choices=[('patient', 'Patient'), ('doctor', 'Doctor')], write_only=True, required=True)
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'password', 'full_name', 'role']
+        fields = ['username', 'email', 'password', 'role']
         extra_kwargs = {
-            'id': {'read_only': True},
             'password': {'write_only': True, 'required': True},
             'username': {'required': True},
-            'first_name': {'read_only': True},
-            'last_name': {'read_only': True},
+            'email': {'required': True},
         }
     def create(self, validated_data):
         role = validated_data.pop('role')
-        full_name = self.initial_data.get('full_name')
-        name_parts = full_name.split(' ', 1)
-        first_name = name_parts[0]
-        last_name = name_parts[1] if len(name_parts) > 1 else ''
         user = User.objects.create_user(
-            first_name=first_name,
-            last_name=last_name,
             username=validated_data['username'],
             email=validated_data['email'],
             password=validated_data['password']
@@ -67,25 +57,37 @@ class UserSerializer(serializers.ModelSerializer):
         return user
 
 class PatientProfileSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(source='user.username', read_only=True)
-    email = serializers.EmailField(source='user.email', read_only=True)
-    first_name = serializers.CharField(source='user.first_name', required=False)
-    last_name = serializers.CharField(source='user.last_name', required=False)
+    full_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    full_name_write = serializers.CharField(write_only=True, required=False)
+    email = serializers.EmailField(source='user.email')
     class Meta:
         model = PatientProfile
         fields = [
-            'id', 'username', 'email', 'first_name', 'last_name', 'address',
-            'gender', 'date_of_birth', 'phone_number', 'diabetes_type',
-            'diagnosis_date', 'medical_notes', 'profile_picture'
+            'full_name', 'address', 'gender', 'date_of_birth', 
+            'phone_number', 'email', 'full_name_write'
         ]
-        read_only_fields = ['id', 'username', 'email']
     def update(self, instance, validated_data):
-        user_data = validated_data.pop('user', {})
-        user_instance = instance.user
-        for attr, value in user_data.items():
-            setattr(user_instance, attr, value)
-        user_instance.save()
-        return super().update(instance, validated_data)
+        user = instance.user
+        full_name = validated_data.get('full_name_write')
+        if full_name:
+            name_parts = full_name.split(' ', 1)
+            user.first_name = name_parts[0]
+            user.last_name = name_parts[1] if len(name_parts) > 1 else ''
+        user_data = validated_data.get('user', {})
+        if 'email' in user_data:
+            user.email = user_data.get('email', user.email)
+        user.save()
+        instance.address = validated_data.get('address', instance.address)
+        instance.gender = validated_data.get('gender', instance.gender)
+        instance.date_of_birth = validated_data.get('date_of_birth', instance.date_of_birth)
+        instance.phone_number = validated_data.get('phone_number', instance.phone_number)
+        instance.save()
+        return instance
+
+class PatientMedicalDataSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PatientProfile
+        fields = ['diabetes_type', 'diagnosis_date', 'medical_notes']
 
 class BloodGlucoseReadingSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.user.first_name', read_only=True)
@@ -151,16 +153,29 @@ class AlertSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'patient', 'patient_name', 'created_at']
 
-class DoctorProfileListSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ['id', 'recipient', 'message', 'is_read', 'timestamp']
+        read_only_fields = ['id', 'recipient', 'message', 'timestamp']
+
+# --- NEW: Serializer for Favorite Doctor LIST VIEW ---
+class FavoriteDoctorListSerializer(serializers.ModelSerializer):
+    # حقل مخصص لعرض اسم الطبيب الكامل
+    full_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    # حقل مخصص لحساب عدد مرات الإضافة للمفضلة
+    favorites_count = serializers.SerializerMethodField()
+
     class Meta:
         model = DoctorProfile
-        fields = [
-            'id', 'user', 'specialty', 'address', 'phone_number',
-            'is_available', 'average_rating'
-        ]
-        read_only_fields = ['id', 'user', 'specialty', 'address', 'phone_number', 'is_available', 'average_rating']
+        # هنا نحدد الحقول المختصرة فقط
+        fields = ['id', 'full_name', 'address', 'phone_number', 'favorites_count']
+    
+    def get_favorites_count(self, obj):
+        # هذه الدالة تقوم بحساب عدد المرضى الذين أضافوا هذا الطبيب للمفضلة
+        return obj.favorited_by_patients.count()
 
+# --- DoctorProfile Detail Serializer (No changes needed) ---
 class DoctorProfileDetailSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     is_favorited = serializers.SerializerMethodField()
@@ -177,6 +192,27 @@ class DoctorProfileDetailSerializer(serializers.ModelSerializer):
             return FavoriteDoctor.objects.filter(patient=request.user.patientprofile, doctor=obj).exists()
         return False
 
+# --- FavoriteDoctor Serializer (UPDATED) ---
+class FavoriteDoctorSerializer(serializers.ModelSerializer):
+    # تم تغيير هذا ليستخدم السيريالايزر الجديد المختصر
+    doctor = FavoriteDoctorListSerializer(read_only=True)
+
+    class Meta:
+        model = FavoriteDoctor
+        fields = ['id', 'doctor']
+
+
+# --- (باقي الكلاسات تبقى كما هي) ---
+class DoctorProfileListSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    class Meta:
+        model = DoctorProfile
+        fields = [
+            'id', 'user', 'specialty', 'address', 'phone_number',
+            'is_available', 'average_rating'
+        ]
+        read_only_fields = ['id', 'user', 'specialty', 'address', 'phone_number', 'is_available', 'average_rating']
+        
 class AppointmentSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.user.get_full_name', read_only=True)
     doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
@@ -187,16 +223,3 @@ class AppointmentSerializer(serializers.ModelSerializer):
             'appointment_date', 'appointment_time', 'status', 'notes'
         ]
         read_only_fields = ['patient', 'status']
-
-class FavoriteDoctorSerializer(serializers.ModelSerializer):
-    doctor = DoctorProfileDetailSerializer(read_only=True)
-    class Meta:
-        model = FavoriteDoctor
-        fields = ['id', 'doctor']
-
-# --- NEW: Notification Serializer ---
-class NotificationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Notification
-        fields = ['id', 'recipient', 'message', 'is_read', 'timestamp']
-        read_only_fields = ['id', 'recipient', 'message', 'timestamp']

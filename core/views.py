@@ -17,6 +17,7 @@ import os
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, action
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication
 from rest_framework import serializers
+from rest_framework import mixins
 
 
 from .models import (
@@ -30,9 +31,10 @@ from .serializers import (
     AuthTokenSerializer, DoctorProfileListSerializer, DoctorProfileDetailSerializer,
     ConsultationSerializer, AlertSerializer,
     FavoriteDoctorSerializer, AppointmentSerializer,
-    NotificationSerializer 
+    NotificationSerializer, PatientMedicalDataSerializer
 )
-from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor
+# --- تم استيراد الصلاحية الجديدة ---
+from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor, IsProfileOwner, IsPatient
 
 # --- (كل الكلاسات السابقة تبقى كما هي بدون تغيير) ---
 class UserViewSet(viewsets.ModelViewSet):
@@ -68,7 +70,7 @@ class CustomAuthToken(ObtainAuthToken):
             'last_name': user.last_name, 'user_type': user_type
         })
 
-class PatientProfileViewSet(viewsets.ModelViewSet):
+class PatientProfileViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = PatientProfile.objects.all()
     serializer_class = PatientProfileSerializer
     permission_classes = [IsAuthenticated, IsPatientOwnerOrDoctor]
@@ -82,6 +84,17 @@ class PatientProfileViewSet(viewsets.ModelViewSet):
         return PatientProfile.objects.none()
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+    @action(detail=True, methods=['get', 'patch'], url_path='medical-data', serializer_class=PatientMedicalDataSerializer)
+    def medical_data(self, request, pk=None):
+        patient_profile = self.get_object()
+        if request.method == 'GET':
+            serializer = self.get_serializer(patient_profile)
+            return Response(serializer.data)
+        elif request.method == 'PATCH':
+            serializer = self.get_serializer(patient_profile, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
 
 class BloodGlucoseReadingViewSet(viewsets.ModelViewSet):
     queryset = BloodGlucoseReading.objects.all()
@@ -227,46 +240,65 @@ class AlertViewSet(viewsets.ModelViewSet):
         status_word = "activated" if new_status else "deactivated"
         return Response({'status': f'All {updated_count} alerts have been {status_word}.'}, status=status.HTTP_200_OK)
 
+# --- DoctorProfile ViewSet (UPDATED WITH CORRECT FAVORITE PERMISSIONS) ---
 class DoctorViewSet(viewsets.ModelViewSet):
     queryset = DoctorProfile.objects.all()
     serializer_class = DoctorProfileDetailSerializer
-    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ['update', 'partial_update', 'destroy']:
+            self.permission_classes = [IsAuthenticated, IsProfileOwner]
+        # --- هذا هو التعديل الجديد ---
+        elif self.action in ['favorite', 'unfavorite', 'list_favorites']:
+            # نستخدم القاعدة الجديدة التي تتأكد فقط من أن المستخدم مريض
+            self.permission_classes = [IsAuthenticated, IsPatient]
+        else:
+            self.permission_classes = [IsAuthenticated]
+        return super().get_permissions()
+
     def get_serializer_class(self):
         if self.action == 'list':
             return DoctorProfileListSerializer
-        elif self.action in ['favorite', 'unfavorite']:
-            return FavoriteDoctorSerializer
+        # لم نعد بحاجة لهذا الشرط هنا
+        # elif self.action in ['favorite', 'unfavorite']:
+        #     return FavoriteDoctorSerializer
         return DoctorProfileDetailSerializer
+        
     def get_queryset(self):
         if hasattr(self.request.user, 'patientprofile'):
             return DoctorProfile.objects.filter(user__is_staff=True, is_available=True).order_by('user__first_name')
         elif self.request.user.is_staff:
             return DoctorProfile.objects.filter(user__is_staff=True).order_by('user__first_name')
         return DoctorProfile.objects.none()
-    @action(detail=True, methods=['post'], permission_classes=[IsPatientOwner])
+        
+    @action(detail=True, methods=['post'])
     def favorite(self, request, pk=None):
-        doctor = get_object_or_404(DoctorProfile, pk=pk)
+        doctor = self.get_object()
         patient_profile = request.user.patientprofile
         favorite, created = FavoriteDoctor.objects.get_or_create(patient=patient_profile, doctor=doctor)
         if created:
             return Response({'status': 'تم إضافة الطبيب إلى المفضلة'}, status=status.HTTP_201_CREATED)
         else:
             return Response({'status': 'هذا الطبيب موجود بالفعل في المفضلة'}, status=status.HTTP_200_OK)
-    @action(detail=True, methods=['delete'], permission_classes=[IsPatientOwner])
+
+    @action(detail=True, methods=['post']) # تم تغييرها إلى POST لتجنب مشاكل 404
     def unfavorite(self, request, pk=None):
-        doctor = get_object_or_404(DoctorProfile, pk=pk)
+        doctor = self.get_object()
         patient_profile = request.user.patientprofile
-        favorite = get_object_or_404(FavoriteDoctor, patient=patient_profile, doctor=doctor)
-        favorite.delete()
-        return Response({'status': 'تم حذف الطبيب من المفضلة'}, status=status.HTTP_204_NO_CONTENT)
-    @action(detail=False, methods=['get'], url_path='favorites', permission_classes=[IsPatientOwner])
+        # نستخدم filter().delete() لتجنب خطأ 404 إذا لم يكن موجوداً
+        deleted_count, _ = FavoriteDoctor.objects.filter(patient=patient_profile, doctor=doctor).delete()
+        if deleted_count > 0:
+            return Response({'status': 'تم حذف الطبيب من المفضلة'}, status=status.HTTP_200_OK)
+        else:
+            return Response({'status': 'الطبيب ليس في المفضلة أصلاً'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(detail=False, methods=['get'], url_path='favorites')
     def list_favorites(self, request):
         patient_profile = request.user.patientprofile
         favorites = FavoriteDoctor.objects.filter(patient=patient_profile)
         serializer = FavoriteDoctorSerializer(favorites, many=True, context={'request': request})
         return Response(serializer.data)
 
-# --- Appointment ViewSet (UPDATED to create Notifications) ---
 class AppointmentViewSet(viewsets.ModelViewSet):
     queryset = Appointment.objects.all().order_by('appointment_date', 'appointment_time')
     serializer_class = AppointmentSerializer
@@ -281,21 +313,15 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         elif hasattr(user, 'doctorprofile'):
             return self.queryset.filter(doctor=user.doctorprofile)
         return Appointment.objects.none()
-    
     def perform_create(self, serializer):
-        # --- هذا هو الجزء الذي تم تعديله ---
         if hasattr(self.request.user, 'patientprofile'):
-            # أولاً، نحفظ الموعد لنحصل على كل تفاصيله
             appointment = serializer.save(patient=self.request.user.patientprofile)
-            
-            # ثانياً، نقوم بإنشاء الإشعار
             doctor_user = appointment.doctor.user
             patient_name = appointment.patient.user.get_full_name()
             message = f"لديك طلب موعد جديد من المريض: {patient_name}"
             Notification.objects.create(recipient=doctor_user, message=message, related_object=appointment)
         else:
             raise serializers.ValidationError("Only patients can create appointments.")
-
     def perform_update(self, serializer):
         instance = serializer.instance
         if self.request.user.is_staff and instance.doctor.user == self.request.user:
@@ -303,7 +329,6 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         else:
             raise serializers.ValidationError("You do not have permission to edit this appointment.")
 
-# --- NEW: Notification ViewSet ---
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]

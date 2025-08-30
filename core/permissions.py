@@ -109,3 +109,19 @@ class IsPatientOwnerOrDoctor(permissions.BasePermission):
             if isinstance(obj, User):
                 return obj == user
         return False
+    # --- هذا هو الكود الجديد الذي سنضيفه ---
+class IsProfileOwner(permissions.BasePermission):
+    """
+    صلاحية مخصصة للتأكد من أن المستخدم الحالي هو صاحب الملف الشخصي.
+    """
+    def has_object_permission(self, request, view, obj):
+        # obj هنا هو DoctorProfile أو PatientProfile
+        # نتحقق إذا كان المستخدم المرتبط بالملف الشخصي هو نفس المستخدم الذي أرسل الطلب
+        return obj.user == request.user
+    
+class IsPatient(permissions.BasePermission):
+    """
+    صلاحية مخصصة للتحقق من أن المستخدم هو مريض.
+    """
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and hasattr(request.user, 'patientprofile')
