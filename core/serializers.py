@@ -177,20 +177,42 @@ class FavoriteDoctorListSerializer(serializers.ModelSerializer):
 
 # --- DoctorProfile Detail Serializer (No changes needed) ---
 class DoctorProfileDetailSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-    is_favorited = serializers.SerializerMethodField()
+    # حقول مخصصة لجلب وتعديل بيانات مودل User المرتبط
+    full_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    full_name_write = serializers.CharField(write_only=True, required=False) # للكتابة فقط
+    email = serializers.EmailField(source='user.email')
+
     class Meta:
         model = DoctorProfile
         fields = [
-            'id', 'user', 'specialty', 'address', 'phone_number',
-            'bio', 'working_hours', 'is_available', 'average_rating', 'is_favorited'
+            'full_name',
+            'address',
+            'phone_number',
+            'email',
+            'working_hours',
+            'bio'
         ]
-        read_only_fields = ['id', 'user', 'is_available', 'average_rating', 'is_favorited']
-    def get_is_favorited(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated and hasattr(request.user, 'patientprofile'):
-            return FavoriteDoctor.objects.filter(patient=request.user.patientprofile, doctor=obj).exists()
-        return False
+
+    def update(self, instance, validated_data):
+        # هذا الكود المخصص يسمح بتحديث بيانات مودل User مع بيانات DoctorProfile
+        user = instance.user
+        
+        # تحديث الاسم الكامل (إذا تم إرساله)
+        if 'full_name_write' in validated_data:
+            full_name = validated_data.pop('full_name_write')
+            name_parts = full_name.split(' ', 1)
+            user.first_name = name_parts[0]
+            user.last_name = name_parts[1] if len(name_parts) > 1 else ''
+        
+        # تحديث الإيميل (إذا تم إرساله)
+        user_data = validated_data.get('user', {})
+        if 'email' in user_data:
+            user.email = user_data.get('email', user.email)
+        
+        user.save()
+
+        # استدعاء دالة التحديث الأساسية لتحديث باقي الحقول (address, bio, etc.)
+        return super().update(instance, validated_data)
 
 # --- FavoriteDoctor Serializer (UPDATED) ---
 class FavoriteDoctorSerializer(serializers.ModelSerializer):
@@ -213,13 +235,46 @@ class DoctorProfileListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'user', 'specialty', 'address', 'phone_number', 'is_available', 'average_rating']
         
-class AppointmentSerializer(serializers.ModelSerializer):
-    patient_name = serializers.CharField(source='patient.user.get_full_name', read_only=True)
-    doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
+class AppointmentCreateSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(write_only=True, required=False)
+    patient_email = serializers.EmailField(write_only=True, required=False)
+    patient_phone = serializers.CharField(write_only=True, required=False)
+
     class Meta:
         model = Appointment
         fields = [
-            'id', 'patient','patient_name', 'doctor','doctor_name', 
+            'doctor', 
+            'appointment_date', 
+            'appointment_time', 
+            'notes',
+            'patient_name',
+            'patient_email',
+            'patient_phone'
+        ]
+
+    def create(self, validated_data):
+        # هنا نقوم بحذف الحقول الوهمية قبل إرسال البيانات للمودل
+        validated_data.pop('patient_name', None)
+        validated_data.pop('patient_email', None)
+        validated_data.pop('patient_phone', None)
+        
+        # الآن نقوم بإنشاء الموعد بالبيانات الصحيحة فقط
+        appointment = super().create(validated_data)
+        return appointment
+    
+# --- Appointment Serializer for VIEWING data (UPDATED) ---
+class AppointmentSerializer(serializers.ModelSerializer):
+    # معلومات إضافية لعرضها (للقراءة فقط)
+    patient_name = serializers.CharField(source='patient.user.get_full_name', read_only=True)
+    doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
+    patient_phone = serializers.CharField(source='patient.phone_number', read_only=True)
+    patient_email = serializers.CharField(source='patient.user.email', read_only=True)
+    
+    class Meta:
+        model = Appointment
+        fields = [
+            'id', 'patient', 'patient_name', 'patient_phone', 'patient_email', 'doctor', 'doctor_name', 
             'appointment_date', 'appointment_time', 'status', 'notes'
         ]
-        read_only_fields = ['patient', 'status']
+        read_only_fields = ['patient', 'status', 'patient_name', 'doctor_name', 'patient_phone', 'patient_email']
+

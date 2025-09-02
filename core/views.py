@@ -31,7 +31,7 @@ from .serializers import (
     AuthTokenSerializer, DoctorProfileListSerializer, DoctorProfileDetailSerializer,
     ConsultationSerializer, AlertSerializer,
     FavoriteDoctorSerializer, AppointmentSerializer,
-    NotificationSerializer, PatientMedicalDataSerializer
+    NotificationSerializer, PatientMedicalDataSerializer, AppointmentCreateSerializer
 )
 # --- تم استيراد الصلاحية الجديدة ---
 from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor, IsProfileOwner, IsPatient
@@ -70,7 +70,7 @@ class CustomAuthToken(ObtainAuthToken):
             'last_name': user.last_name, 'user_type': user_type
         })
 
-class PatientProfileViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
+class PatientProfileViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, mixins.UpdateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = PatientProfile.objects.all()
     serializer_class = PatientProfileSerializer
     permission_classes = [IsAuthenticated, IsPatientOwnerOrDoctor]
@@ -294,18 +294,37 @@ class DoctorViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='favorites')
     def list_favorites(self, request):
+        # هنا بنتأكد انه المستخدم هو مريض
+        if not hasattr(request.user, 'patientprofile'):
+            return Response({"error": "Only patients can have favorites."}, status=status.HTTP_403_FORBIDDEN)
+            
         patient_profile = request.user.patientprofile
         favorites = FavoriteDoctor.objects.filter(patient=patient_profile)
+
+        # هنا بنتأكد إذا القائمة فاضية أو لأ
+        if not favorites.exists():
+            return Response({"message": "لا يوجد لديك أطباء مفضلين بعد."})
+        
+        # لو القائمة مش فاضية، بنكمل عادي
         serializer = FavoriteDoctorSerializer(favorites, many=True, context={'request': request})
         return Response(serializer.data)
 
+
 class AppointmentViewSet(viewsets.ModelViewSet):
     queryset = Appointment.objects.all().order_by('appointment_date', 'appointment_time')
+    # السيريالايزر الافتراضي هو للعرض
     serializer_class = AppointmentSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['appointment_date', 'status']
     ordering_fields = ['appointment_date', 'appointment_time']
+
+    def get_serializer_class(self):
+        # هنا نخبره: "إذا كانت العملية هي إنشاء، استخدم الاستمارة البسيطة"
+        if self.action == 'create':
+            return AppointmentCreateSerializer
+        return super().get_serializer_class()
+
     def get_queryset(self):
         user = self.request.user
         if hasattr(user, 'patientprofile'):
@@ -313,6 +332,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         elif hasattr(user, 'doctorprofile'):
             return self.queryset.filter(doctor=user.doctorprofile)
         return Appointment.objects.none()
+
     def perform_create(self, serializer):
         if hasattr(self.request.user, 'patientprofile'):
             appointment = serializer.save(patient=self.request.user.patientprofile)
@@ -322,13 +342,14 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             Notification.objects.create(recipient=doctor_user, message=message, related_object=appointment)
         else:
             raise serializers.ValidationError("Only patients can create appointments.")
+
     def perform_update(self, serializer):
         instance = serializer.instance
         if self.request.user.is_staff and instance.doctor.user == self.request.user:
             serializer.save()
         else:
             raise serializers.ValidationError("You do not have permission to edit this appointment.")
-
+        
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
