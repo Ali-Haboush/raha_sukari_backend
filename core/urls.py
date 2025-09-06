@@ -13,7 +13,7 @@ from .views import (
     AlertViewSet,
     DoctorViewSet,
     AppointmentViewSet,
-    NotificationViewSet, # <-- استيراد الـ ViewSet الجديد
+    NotificationViewSet, 
     CustomAuthToken,
     generate_pdf_report
 )
@@ -29,7 +29,7 @@ router.register(r'consultations', ConsultationViewSet, basename='consultation')
 router.register(r'alerts', AlertViewSet, basename='alert')
 router.register(r'doctors', DoctorViewSet, basename='doctor')
 router.register(r'appointments', AppointmentViewSet, basename='appointment')
-router.register(r'notifications', NotificationViewSet, basename='notification') # <-- السطر الجديد
+router.register(r'notifications', NotificationViewSet, basename='notification') 
 
 urlpatterns = [
     path('', include(router.urls)),

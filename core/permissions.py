@@ -125,3 +125,22 @@ class IsPatient(permissions.BasePermission):
     """
     def has_permission(self, request, view):
         return request.user.is_authenticated and hasattr(request.user, 'patientprofile')
+    
+# --- NEW Permissions for Consultations ---
+class IsDoctorOrReadOnly(permissions.BasePermission):
+    """
+    يسمح للطبيب فقط بإنشاء وتعديل الاستشارات، بينما يسمح للآخرين (المريض) بالعرض فقط.
+    """
+    def has_permission(self, request, view):
+        # أي مستخدم مسجل دخوله يمكنه العرض (GET)
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        # فقط الأطباء يمكنهم الإنشاء والتعديل (POST, PUT, PATCH)
+        return request.user.is_authenticated and request.user.is_staff
+
+class IsPatientOwnerOfConsultation(permissions.BasePermission):
+    """
+    يسمح فقط للمريض صاحب الاستشارة بحذفها.
+    """
+    def has_object_permission(self, request, view, obj):
+        return obj.patient.user == request.user
