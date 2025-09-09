@@ -5,7 +5,7 @@ from django.db.models import Q
 # لازم نستورد PatientProfile و DoctorNote لأننا نستخدمهم في التحقق من isinstance
 from .models import PatientProfile, DoctorNote
 # لازم نستورد User لأننا نتحقق من صلاحية is_staff ونقارن المستخدمين
-from django.contrib.auth.models import User # تم التأكد من وجود هذا الاستيراد
+from django.contrib.auth.models import User 
 
 # صلاحية: هل المستخدم هو مالك الكائن (البيانات) أو طبيب؟
 class IsOwnerOrDoctor(permissions.BasePermission):

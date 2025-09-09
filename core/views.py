@@ -44,7 +44,7 @@ from .serializers import (
 from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor, IsProfileOwner, IsPatient, IsDoctorOrReadOnly, IsPatientOwnerOfConsultation
 
 
-# --- (كل الكلاسات السابقة تبقى كما هي بدون تغيير) ---
+
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
@@ -108,7 +108,6 @@ class PatientProfileViewSet(mixins.CreateModelMixin, mixins.RetrieveModelMixin, 
         
     @action(detail=True, methods=['get', 'patch'], url_path='medical-data', serializer_class=PatientMedicalDataSerializer)
     def medical_data(self, request, pk=None):
-        # ... (هذه الدالة تبقى كما هي)
         patient_profile = self.get_object()
         if request.method == 'GET':
             serializer = self.get_serializer(patient_profile)
@@ -331,7 +330,6 @@ class DoctorViewSet(viewsets.ReadOnlyModelViewSet):
     
     @action(detail=True, methods=['post'], permission_classes=[IsPatient])
     def favorite(self, request, pk=None):
-        # ... (الكود كما هو)
         doctor = self.get_object()
         patient_profile = request.user.patientprofile
         favorite, created = FavoriteDoctor.objects.get_or_create(patient=patient_profile, doctor=doctor)
@@ -342,7 +340,6 @@ class DoctorViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='unfavorite', permission_classes=[IsPatient])
     def unfavorite(self, request, pk=None):
-        # ... (الكود كما هو)
         doctor = self.get_object()
         patient_profile = request.user.patientprofile
         deleted_count, _ = FavoriteDoctor.objects.filter(patient=patient_profile, doctor=doctor).delete()
