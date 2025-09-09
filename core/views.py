@@ -14,10 +14,12 @@ from weasyprint import HTML, CSS
 from django.utils import timezone
 import os
 
+
 from rest_framework.decorators import api_view, authentication_classes, permission_classes, action
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication
 from rest_framework import serializers
 from rest_framework import mixins
+from drf_spectacular.utils import extend_schema
 
 
 from .models import (
@@ -35,7 +37,8 @@ from .serializers import (
     AppointmentCreateSerializer, PatientListForDoctorSerializer,
     DoctorProfileSerializer,
     DoctorProfileListSerializer, 
-    FavoriteDoctorListSerializer, PatientAppointmentSerializer, DoctorAppointmentListSerializer, DoctorAppointmentUpdateSerializer 
+    FavoriteDoctorListSerializer, PatientAppointmentSerializer, DoctorAppointmentListSerializer, DoctorAppointmentUpdateSerializer,
+    AppointmentRespondSerializer  
 )
 
 from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor, IsProfileOwner, IsPatient, IsDoctorOrReadOnly, IsPatientOwnerOfConsultation
@@ -359,45 +362,35 @@ class DoctorViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 
-# --- AppointmentViewSet (UPDATED with full logic) ---
+# --- AppointmentViewSet  ---
 class AppointmentViewSet(viewsets.ModelViewSet):
     pagination_class = None
     queryset = Appointment.objects.all().order_by('appointment_date', 'appointment_time')
     permission_classes = [IsAuthenticated]
-    # هنا بنسمح للفرونت إند يفلتر حسب الحالة والتاريخ
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['status', 'appointment_date'] 
     ordering_fields = ['appointment_date', 'appointment_time']
 
     def get_serializer_class(self):
-        # إذا كانت العملية هي إنشاء، نستخدم استمارة الإنشاء
         if self.action == 'create':
             return AppointmentCreateSerializer
-        
-       
-        # إذا كانت العملية هي تعديل، نستخدم استمارة التعديل الخاصة بالطبيب
         if self.action in ['update', 'partial_update']:
             return DoctorAppointmentUpdateSerializer
-        
-        # إذا كان المستخدم طبيب ويعرض القائمة، نعطيه قائمة الانتظار
+        if self.action == 'respond': # أضفنا هذا الشرط لـ respond
+            return AppointmentRespondSerializer
         if hasattr(self.request.user, 'doctorprofile'):
             return DoctorAppointmentListSerializer
-        
-        # إذا كان المستخدم مريض، نعطيه العرض المفصل
         if hasattr(self.request.user, 'patientprofile'):
             return PatientAppointmentSerializer
-            
         return super().get_serializer_class()
 
     def get_queryset(self):
         user = self.request.user
         if hasattr(user, 'patientprofile'):
-            # المريض يرى كل مواعيده
+            # المريض يرى كل مواعيده بكل الحالات (مقبول، مرفوض، قيد الانتظار)
             return self.queryset.filter(patient=user.patientprofile)
         elif hasattr(user, 'doctorprofile'):
-            # الطبيب يرى كل المواعيد المرتبطة به
-            # والفرونت إند هو من يفلتر بين قائمة الانتظار والحجوزات
-            return self.queryset.filter(doctor=user.doctorprofile)
+            return self.queryset.filter(doctor=user.doctorprofile).exclude(status='Rejected')
         return Appointment.objects.none()
 
     def perform_create(self, serializer):
@@ -411,22 +404,61 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError("Only patients can create appointments.")
 
     def perform_update(self, serializer):
-        instance = serializer.instance
-        if self.request.user.is_staff and instance.doctor.user == self.request.user:
-            
-            # هذا هو المنطق الجديد والمهم
-            new_status = self.request.data.get('status')
-            
-            # إذا الطبيب وافق على الموعد
-            if new_status == 'Confirmed':
-                doctor_profile = self.request.user.doctorprofile
-                patient_profile = instance.patient
-                doctor_profile.patients.add(patient_profile)
-
+        if self.request.user.is_staff and serializer.instance.doctor.user == self.request.user:
             serializer.save()
         else:
             raise serializers.ValidationError("You do not have permission to edit this appointment.")
+
+    
+    @extend_schema(
+        request=AppointmentRespondSerializer,
+        responses={
+            200: {'description': 'تم الرد على الموعد بنجاح.'},
+            400: {'description': 'طلب غير صالح (مثلاً: تم الرد على الموعد مسبقاً).'},
+        }
+    )
+    @action(
+        detail=True, 
+        methods=['post'], 
+        url_path='respond', 
+        permission_classes=[IsAuthenticated, IsDoctor]
+    )
+    def respond(self, request, pk=None):
+        appointment = self.get_object()
         
+        if appointment.status != 'Pending':
+            return Response(
+                {'error': 'This appointment has already been responded to.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        accepted = serializer.validated_data['accepted']
+
+        if accepted:
+            appointment.status = 'Confirmed'
+            doctor_profile = request.user.doctorprofile
+            patient_profile = appointment.patient
+            doctor_profile.patients.add(patient_profile)
+            message = "تم قبول الموعد بنجاح."
+        else:
+            appointment.status = 'Rejected'
+            message = "تم رفض الموعد."
+            
+        appointment.save()
+        
+        notification_message = f"لقد تم {appointment.get_status_display()} موعدك مع د. {appointment.doctor.user.get_full_name()}"
+        Notification.objects.create(
+            recipient=appointment.patient.user, 
+            message=notification_message,
+            related_object=appointment
+        )
+        
+        return Response({'status': message, 'appointment_status': appointment.status}, status=status.HTTP_200_OK)
+
+
+
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]

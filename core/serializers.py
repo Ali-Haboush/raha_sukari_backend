@@ -344,7 +344,13 @@ class DoctorAppointmentUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Appointment
         # هنا الحقول فقط التي نسمح للطبيب بتعديلها
-        fields = ['appointment_date', 'appointment_time', 'status']   
+        fields = ['appointment_date', 'appointment_time']   
+
+class AppointmentRespondSerializer(serializers.Serializer):
+    """
+    Serializer بسيط جداً يستقبل فقط قيمة بوليانية للقبول أو الرفض.
+    """
+    accepted = serializers.BooleanField(required=True)
 
 class FavoriteDoctorListSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source='user.get_full_name', read_only=True)
