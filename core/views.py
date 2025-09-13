@@ -362,35 +362,79 @@ class DoctorViewSet(viewsets.ReadOnlyModelViewSet):
 # --- AppointmentViewSet  ---
 class AppointmentViewSet(viewsets.ModelViewSet):
     pagination_class = None
-    queryset = Appointment.objects.all().order_by('appointment_date', 'appointment_time')
+    # سنزيل الترتيب من هنا لنضعه في كل دالة بشكل منفصل
+    queryset = Appointment.objects.all() 
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['status', 'appointment_date'] 
     ordering_fields = ['appointment_date', 'appointment_time']
 
     def get_serializer_class(self):
+        # ... (هذه الدالة تبقى كما كانت في آخر تعديل)
         if self.action == 'create':
             return AppointmentCreateSerializer
         if self.action in ['update', 'partial_update']:
             return DoctorAppointmentUpdateSerializer
-        if self.action == 'respond': # أضفنا هذا الشرط لـ respond
+        if self.action == 'respond':
             return AppointmentRespondSerializer
-        if hasattr(self.request.user, 'doctorprofile'):
-            return DoctorAppointmentListSerializer
+        # عندما يكون المستخدم مريض، سواء كان يعرض القائمة الحالية أو السابقة
+        # فإنه يستخدم نفس الـ Serializer
         if hasattr(self.request.user, 'patientprofile'):
             return PatientAppointmentSerializer
+        if hasattr(self.request.user, 'doctorprofile'):
+            return DoctorAppointmentListSerializer
         return super().get_serializer_class()
 
     def get_queryset(self):
+        """
+        هذه الدالة الآن أصبحت خاصة فقط بعرض القائمة الافتراضية 
+        (المواعيد القادمة للمريض، أو قائمة عمل الطبيب)
+        """
         user = self.request.user
+        today = timezone.now().date()
+
         if hasattr(user, 'patientprofile'):
-            # المريض يرى كل مواعيده بكل الحالات (مقبول، مرفوض، قيد الانتظار)
-            return self.queryset.filter(patient=user.patientprofile)
+            # ---تعديل 1: القائمة الافتراضية الآن تعرض المواعيد القادمة فقط ---
+            # (المواعيد من تاريخ اليوم فصاعداً)
+            return self.queryset.filter(
+                patient=user.patientprofile,
+                appointment_date__gte=today
+            ).order_by('appointment_date', 'appointment_time') # ترتيب تصاعدي
+
         elif hasattr(user, 'doctorprofile'):
-            return self.queryset.filter(doctor=user.doctorprofile).exclude(status='Rejected')
+            # الطبيب يرى المواعيد التي لم ترفض 
+            return self.queryset.filter(
+                doctor=user.doctorprofile
+            ).exclude(status='Rejected').order_by('appointment_date', 'appointment_time')
+
         return Appointment.objects.none()
 
+    # ---  تعديل 2: إضافة API جديد ومخصص للمواعيد السابقة ---
+    @action(
+        detail=False, 
+        methods=['get'], 
+        url_path='past', 
+        permission_classes=[IsAuthenticated, IsPatient]
+    )
+    def past(self, request):
+        """
+        API مخصص للمريض لعرض قائمة مواعيده السابقة فقط.
+        """
+        today = timezone.now().date()
+        
+        # فلترة المواعيد السابقة (قبل تاريخ اليوم)
+        past_appointments = self.queryset.filter(
+            patient=request.user.patientprofile,
+            appointment_date__lt=today
+        ).order_by('-appointment_date', '-appointment_time') # ترتيب تنازلي (الأحدث أولاً)
+
+        # تحويل البيانات باستخدام الـ Serializer المناسب للمريض
+        serializer = self.get_serializer(past_appointments, many=True)
+        return Response(serializer.data)
+
+    # ... (باقي الدوال perform_create, perform_update, respond تبقى كما هي تماماً) ...
     def perform_create(self, serializer):
+        
         if hasattr(self.request.user, 'patientprofile'):
             appointment = serializer.save(patient=self.request.user.patientprofile)
             doctor_user = appointment.doctor.user
@@ -401,38 +445,22 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError("Only patients can create appointments.")
 
     def perform_update(self, serializer):
+        
         if self.request.user.is_staff and serializer.instance.doctor.user == self.request.user:
             serializer.save()
         else:
             raise serializers.ValidationError("You do not have permission to edit this appointment.")
 
-    
-    @extend_schema(
-        request=AppointmentRespondSerializer,
-        responses={
-            200: {'description': 'تم الرد على الموعد بنجاح.'},
-            400: {'description': 'طلب غير صالح (مثلاً: تم الرد على الموعد مسبقاً).'},
-        }
-    )
-    @action(
-        detail=True, 
-        methods=['post'], 
-        url_path='respond', 
-        permission_classes=[IsAuthenticated, IsDoctor]
-    )
+    @extend_schema(request=AppointmentRespondSerializer)
+    @action(detail=True, methods=['post'], url_path='respond', permission_classes=[IsAuthenticated, IsDoctor])
     def respond(self, request, pk=None):
-        appointment = self.get_object()
         
+        appointment = self.get_object()
         if appointment.status != 'Pending':
-            return Response(
-                {'error': 'This appointment has already been responded to.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
+            return Response({'error': 'This appointment has already been responded to.'}, status=status.HTTP_400_BAD_REQUEST)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         accepted = serializer.validated_data['accepted']
-
         if accepted:
             appointment.status = 'Confirmed'
             doctor_profile = request.user.doctorprofile
@@ -442,19 +470,10 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         else:
             appointment.status = 'Rejected'
             message = "تم رفض الموعد."
-            
         appointment.save()
-        
         notification_message = f"لقد تم {appointment.get_status_display()} موعدك مع د. {appointment.doctor.user.get_full_name()}"
-        Notification.objects.create(
-            recipient=appointment.patient.user, 
-            message=notification_message,
-            related_object=appointment
-        )
-        
+        Notification.objects.create(recipient=appointment.patient.user, message=notification_message, related_object=appointment)
         return Response({'status': message, 'appointment_status': appointment.status}, status=status.HTTP_200_OK)
-
-
 
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = NotificationSerializer

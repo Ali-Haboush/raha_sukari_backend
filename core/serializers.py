@@ -321,6 +321,11 @@ class DoctorAppointmentListSerializer(serializers.ModelSerializer):
         # هنا بنعرض بس اسم المريض وتاريخ ووقت الحجز
         fields = ['id', 'patient_name', 'appointment_date', 'appointment_time']
 
+DAYS_AR = {
+    'Saturday': 'السبت', 'Sunday': 'الأحد', 'Monday': 'الإثنين',
+    'Tuesday': 'الثلاثاء', 'Wednesday': 'الأربعاء', 'Thursday': 'الخميس',
+    'Friday': 'الجمعة'
+}
 
 # --- NEW: Serializer for Patient's Appointment View ---
 class PatientAppointmentSerializer(serializers.ModelSerializer):
@@ -328,18 +333,33 @@ class PatientAppointmentSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.user.get_full_name')
     doctor_specialty = serializers.CharField(source='doctor.specialty')
     status_display = serializers.CharField(source='get_status_display')
+    
+    
+    appointment_day = serializers.SerializerMethodField()
+
     class Meta:
         model = Appointment
-        # هنا بنعرض البيانات الكاملة اللي طلبها المريض
+        
         fields = [
             'id', 
             'doctor_name', 
             'doctor_specialty', 
             'appointment_date', 
-            'appointment_time', 
+            'appointment_time',
+            'appointment_day', # اسم اليوم
             'status',
             'status_display'
         ]
+
+    def get_appointment_day(self, obj):
+        """
+        هذه الدالة تقوم بحساب اسم اليوم من تاريخ الموعد وترجمته للعربية.
+        """
+        if obj.appointment_date:
+            english_day = obj.appointment_date.strftime('%A') # e.g., 'Thursday'
+            return DAYS_AR.get(english_day, english_day) # Returns Arabic name, or English if not found
+        return None
+    
 class DoctorAppointmentUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Appointment
