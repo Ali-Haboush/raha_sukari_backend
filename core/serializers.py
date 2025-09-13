@@ -164,7 +164,19 @@ class ConsultationSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'patient': {'write_only': True} # نجعل حقل المريض للكتابة فقط
         }
-        
+
+# --- NEW: Serializer for a Doctor to Add Diagnosis and Treatment ---
+class ConsultationDiagnoseSerializer(serializers.Serializer):
+    """
+    Serializer مخصص للتحقق من بيانات التشخيص والعلاج التي يرسلها الطبيب.
+    """
+    diagnosis = serializers.CharField(required=True)
+    treatment = serializers.CharField(required=True)
+
+    class Meta:
+        # هذه الحقول ليست مرتبطة مباشرة بموديل، بل هي مدخلات لعملية معينة
+        fields = ['diagnosis', 'treatment'] 
+               
 # --- Alert Serializer ---
 class AlertSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.user.get_full_name', read_only=True)

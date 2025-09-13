@@ -38,7 +38,7 @@ from .serializers import (
     DoctorProfileSerializer,
     DoctorProfileListSerializer, 
     FavoriteDoctorListSerializer, PatientAppointmentSerializer, DoctorAppointmentListSerializer, DoctorAppointmentUpdateSerializer,
-    AppointmentRespondSerializer  
+    AppointmentRespondSerializer, ConsultationDiagnoseSerializer  
 )
 
 from .permissions import IsDoctor, IsPatientOwner, IsOwnerOrDoctor, IsPatientOwnerOrDoctor, IsProfileOwner, IsPatient, IsDoctorOrReadOnly, IsPatientOwnerOfConsultation
@@ -241,6 +241,45 @@ class ConsultationViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # هذا المنطق يضمن أن الطبيب هو من ينشئ الاستشارة ويربطها بنفسه
         serializer.save(doctor=self.request.user)
+
+    @action(
+        detail=True, 
+        methods=['post'], 
+        url_path='diagnose',
+        permission_classes=[IsAuthenticated, IsDoctor],
+        serializer_class=ConsultationDiagnoseSerializer
+    )
+    def diagnose(self, request, pk=None):
+        """
+        API مخصص للطبيب لإضافة تشخيص وعلاج لاستشارة موجودة.
+        """
+        # 1. نحصل على الاستشارة المحددة من قاعدة البيانات
+        consultation = self.get_object()
+
+        # 2. نتحقق من صحة البيانات المرسلة (diagnosis, treatment)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # 3. نحدّث بيانات الاستشارة
+        consultation.diagnosis = serializer.validated_data['diagnosis']
+        consultation.treatment = serializer.validated_data['treatment']
+        consultation.save()
+
+        # 4. نرسل إشعاراً للمريض
+        doctor_name = request.user.get_full_name() or request.user.username
+        notification_message = f"قام د. {doctor_name} بإضافة تشخيص وخطة علاج جديدة لك."
+        
+        Notification.objects.create(
+            recipient=consultation.patient.user,
+            message=notification_message,
+            related_object=consultation  # نربط الإشعار بالاستشارة نفسها
+        )
+        
+        # 5. نرجع رسالة نجاح للطبيب
+        return Response(
+            {'status': 'تم حفظ التشخيص والعلاج وإرسال إشعار للمريض بنجاح.'},
+            status=status.HTTP_200_OK
+        )
 
 class AlertViewSet(viewsets.ModelViewSet):
     queryset = Alert.objects.all()
