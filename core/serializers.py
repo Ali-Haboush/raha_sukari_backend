@@ -46,15 +46,22 @@ class UserSerializer(serializers.ModelSerializer):
             'email': {'required': True},
         }
     def create(self, validated_data):
+        
         role = validated_data.pop('role')
-        user = User.objects.create_user(
+        
+        
+        is_staff_flag = (role == 'doctor')
+
+        # نستخدم create() بدلاً من create_user() للتحكم الكامل
+        user = User.objects.create(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=validated_data['password']
+            is_staff=is_staff_flag  #  نحدد الدور هنا
         )
-        if role == 'doctor':
-            user.is_staff = True
-            user.save()
+        # نقوم بتشفير كلمة المرور يدوياً لأننا لم نستخدم create_user
+        user.set_password(validated_data['password'])
+        user.save()
+        
         return user
 
 # --- PatientProfile Serializer ---
@@ -197,14 +204,15 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 # --- NEW: Serializer for Doctor's Personal Data ONLY ---
 class DoctorProfileSerializer(serializers.ModelSerializer):
-    # حقل مخصص لتعديل الاسم الكامل في مودل User
+    """
+    Serializer يستخدمه الطبيب لتحديث بياناته الشخصية.
+    تم إصلاح دالة update هنا لحل مشكلة PATCH.
+    """
     full_name = serializers.CharField(source='user.get_full_name', required=False)
-    # حقل مخصص لتعديل الإيميل في مودل User
     email = serializers.EmailField(source='user.email', required=False)
 
     class Meta:
         model = DoctorProfile
-        # هنا فقط الحقول التي تظهر في الواجهة
         fields = [
             'full_name',
             'address',
@@ -215,22 +223,29 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
         ]
 
     def update(self, instance, validated_data):
+        """
+        النسخة النهائية والصحيحة لدالة التحديث التي تتعامل مع البيانات المتداخلة.
+        """
+        # 1. نستخرج بيانات المستخدم المتداخلة إذا كانت موجودة
         user_data = validated_data.pop('user', {})
         user = instance.user
 
-        # تحديث الاسم الكامل (إذا تم إرساله)
-        if 'get_full_name' in validated_data:
-             full_name = validated_data.pop('get_full_name')
-             name_parts = full_name.split(' ', 1)
-             user.first_name = name_parts[0]
-             user.last_name = name_parts[1] if len(name_parts) > 1 else ''
+        # 2. نقوم بتحديث بيانات موديل User
+        if 'get_full_name' in user_data:
+            full_name = user_data.get('get_full_name')
+            name_parts = full_name.split(' ', 1)
+            user.first_name = name_parts[0]
+            user.last_name = name_parts[1] if len(name_parts) > 1 else ''
         
-        # تحديث الإيميل (إذا تم إرساله)
         if 'email' in user_data:
             user.email = user_data.get('email', user.email)
         
         user.save()
+
+        # 3. نقوم بتحديث بيانات موديل DoctorProfile باستخدام الطريقة الافتراضية الآمنة
+        # validated_data الآن تحتوي فقط على حقول DoctorProfile
         return super().update(instance, validated_data)
+
     
 class DoctorProfileDetailSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -343,7 +358,7 @@ DAYS_AR = {
 class PatientAppointmentSerializer(serializers.ModelSerializer):
     # هنا بنجيب اسم الطبيب وتخصصه
     doctor_name = serializers.CharField(source='doctor.user.get_full_name')
-    doctor_specialty = serializers.CharField(source='doctor.specialty')
+    doctor_specialty = serializers.CharField(source='doctor.bio', read_only=True)
     status_display = serializers.CharField(source='get_status_display')
     
     
@@ -401,11 +416,20 @@ class FavoriteDoctorSerializer(serializers.ModelSerializer):
 
 
 class DoctorProfileListSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
+    """
+    Serializer لعرض قائمة الأطباء للمرضى.
+    تم تعديله ليعرض الاسم الكامل وحقل المؤهلات (bio).
+    """
+    full_name = serializers.CharField(source='user.get_full_name', read_only=True)
+
     class Meta:
         model = DoctorProfile
         fields = [
-            'id', 'user', 'specialty', 'address', 'phone_number',
-            'is_available', 'average_rating'
+            'id', 
+            'full_name', 
+            'bio', # هذا هو التخصص الذي سيظهر للمريض
+            'address', 
+            'phone_number',
+            'is_available', 
+            'average_rating'
         ]
-        read_only_fields = ['id', 'user', 'specialty', 'address', 'phone_number', 'is_available', 'average_rating']

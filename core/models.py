@@ -59,15 +59,22 @@ class PatientProfile(models.Model):
     def __str__(self):
         return f"Patient Profile for {self.user.username}"
 
-@receiver(post_save, sender=User)
-def create_or_update_patient_profile(sender, instance, created, **kwargs):
-    if not instance.is_staff and not hasattr(instance, 'patientprofile'):
-        PatientProfile.objects.create(user=instance)
+
 
 @receiver(post_save, sender=User)
-def create_or_update_doctor_profile(sender, instance, created, **kwargs):
-    if instance.is_staff and not hasattr(instance, 'doctorprofile'):
-        DoctorProfile.objects.create(user=instance)
+def create_user_profile(sender, instance, created, **kwargs):
+    """
+    Signal ذكي وموحد لإنشاء الملف الشخصي الصحيح (طبيب أو مريض)
+    بعد إنشاء مستخدم جديد.
+    """
+    # نتأكد أن المستخدم تم إنشاؤه للتو (وليس مجرد تحديث)
+    if created:
+        if instance.is_staff:
+            # إذا كان المستخدم staff، ننشئ له DoctorProfile
+            DoctorProfile.objects.get_or_create(user=instance)
+        else:
+            # إذا لم يكن staff، ننشئ له PatientProfile
+            PatientProfile.objects.get_or_create(user=instance)
 
 class BloodGlucoseReading(models.Model):
     READING_TYPE_CHOICES = [
