@@ -399,6 +399,19 @@ class AppointmentRespondSerializer(serializers.Serializer):
     """
     accepted = serializers.BooleanField(required=True)
 
+# --- NEW: Serializer for Doctor's Confirmed Bookings List ---
+class DoctorBookingsSerializer(serializers.ModelSerializer):
+    """
+    Serializer مخصص لعرض قائمة الحجوزات المؤكدة للطبيب.
+    """
+    patient_name = serializers.CharField(source='patient.user.get_full_name', read_only=True)
+
+    class Meta:
+        model = Appointment
+        # نعرض فقط الحقول المطلوبة في الواجهة
+        fields = ['id', 'patient_name', 'appointment_date', 'appointment_time']
+
+
 class FavoriteDoctorListSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source='user.get_full_name', read_only=True)
     favorites_count = serializers.SerializerMethodField()
